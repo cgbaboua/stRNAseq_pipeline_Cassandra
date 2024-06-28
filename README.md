@@ -1,12 +1,41 @@
 # Spatial Transcriptomics Pipeline
 
 ## Table of Contents
+- [Overview](#overview)
+- [System Requirements](#system-requirements)
+- [Installation](#installation)
+  - [Clone the Repository](#clone-the-repository)
 - [Pipeline description](#pipeline-description)
   - [Quality Control](#quality-control)
   - [Normalization](#normalization)
   - [Dimensionality Reduction](#dimensionality-reduction)
   - [Clustering](#clustering)
-  - [Cell Type Annotation](#cell-type-annotation)
+  - [Annotation and Cell Type Identification](#annotation-and-cell-type-identification)
+- [Usage Instructions](#usage-instructions)
+- [Dependencies](#dependencies)
+- [Additional Resources](#additional-resources)
+
+## Overview
+
+The Spatial Transcriptomics pipeline is designed to process and analyze spatial transcriptomics data through a series of structured R Markdown scripts. Each script corresponds to a stage in the data processing workflow, from quality control to clustering and cell type annotation.
+The pipeline operates on Colon data (ColonN_1215002B and CRC_24676A1) and includes specialized scripts for transforming, normalizing, and analyzing spatial RNA-seq data.
+The reference data for cell annotation was found on [TISCH DB](http://tisch.comp-genomics.org/gallery/?cancer=CRC) and the CRC_GSE166555 data.
+
+## System Requirements
+
+- R version 4.3.2 or higher
+- Compatible with Unix-based operating systems; Windows users are advised to use the Windows Subsystem for Linux (WSL) or AXE 
+- Adequate storage to handle large datasets typically associated with spatial transcriptomics
+
+## Installation
+
+### Clone the Repository
+
+To obtain the latest version of the pipeline, clone the repository using the following command:
+
+```bash
+git clone https://github.com/servier-github/Projet_Long_stRNAsq.git
+```
 
 ## Pipeline Description
 
@@ -153,4 +182,18 @@ The script operates on clustered data, which should be available in the followin
 - Users may need to integrate additional gene signature databases or adjust scoring thresholds to improve the precision of cell type identification.
 - It's recommended to iteratively refine annotations by incorporating expert knowledge and biological context.
 - Ensure the file paths used for input and output are consistent with the local data storage organization.
+
+## Usage Instructions
+
+1. **Set up your environment**: Update the directory paths (`directory`, `data_dir`, `save_dir`, `out_dir`) in each script to match your local environment.
+2. **Run scripts in sequence**: Start with `01_QC_t.qmd` and proceed through the pipeline by following the numbering of the scripts.
+3. **Review results**: Check the output files and logs for each script to understand the analysis outcomes and insights.
+
+## Dependencies
+
+- **R packages**: Seurat (5.0.1), ggplot2 (3.4.4), DESeq2 (1.42.0), and others.
+- A full list of dependencies is included at the start of each script for easy reference.
+
+## Additional Resources
+For additional help and resources, please refer to the [Spatial Transcriptomics with Seurat](https://satijalab.org/seurat/articles/pbmc3k_tutorial).
 
