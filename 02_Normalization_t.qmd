@@ -1,0 +1,357 @@
+---
+title: "02_Normalization_t"
+format: html
+editor: visual
+---
+
+# **SAMPLE SEX SCORING**
+
+<!--  Setting up global markdown environment -->
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE)
+```
+
+<!--  Cleaning r environment -->
+
+```{r, include=FALSE}
+#rm(list=ls())
+```
+
+<!-- Loading useful libraries --->
+
+::: info
+Loading useful libraries
+:::
+
+```{r}
+suppressPackageStartupMessages({
+  #To install Matrix >1.65 : install.packages("Matrix", repos = "http://R-Forge.R-project.org")and restart session
+  library(Seurat)
+  library(ggplot2)
+  library(DESeq2)
+  library(scater)
+  library(cowplot)
+})
+
+set.seed(333)
+```
+
+::: info
+Set directories and variables
+:::
+
+```{r Set directories and variables}
+# *** MODIFY HERE ****
+# General directory
+directory <- '~/Projet_Long/Projet_Long_stRNAsq/'
+setwd(directory)
+
+# Set the name of the sample as a prefix (listing all dataset directories under MyData)
+sample_dirs <- list.files(data_dir, full.names = TRUE)
+prefixes <- basename(sample_dirs)  # Assuming directory names are the prefixes (ex : ColonN_1215002B)
+
+# Data directory
+data_dirs <- sapply(prefixes,function(x) paste0(directory, "ST_outfiles/",x,"/rds_data/01_QC/"))
+
+# Dir where to save images
+save_dir <- paste0(directory, 'plots/02_SCT/')
+
+
+# Output directories for each sample
+out_dirs <- sapply(prefixes, function(x) paste0(directory, "ST_outfiles/",x,"/"))
+
+# Creating directories if they don't exist
+invisible(sapply(out_dirs, dir.create, recursive = TRUE))
+
+# Sample sex scoring
+# If the file is missing, the pipeline will directly download it
+
+genes.file <- "~/Projet_Long/Projet_Long_stRNAsq/Data/Reference_Data/genes.table.csv"
+
+# True if you want to save plots and files
+save_data <- TRUE
+```
+
+::: info
+Loading the data
+:::
+
+```{r loading the data,warning=FALSE}
+# Loading and initial normalization for sample 1
+stRNAseq_02_plots_1 <- paste0(save_dir, prefixes[1])
+dir.create(stRNAseq_02_plots_1, recursive=TRUE)
+
+# UPLOAD THE OBJECT for sample 1
+QC_matrix_1 <- readRDS(paste0(data_dirs[1],paste0(prefixes[1],"_QC_matrix.rds")))
+
+# Initial normalization for sample 1
+QC_matrix_1 <- NormalizeData(QC_matrix_1, verbose = FALSE)
+
+# Loading and initial normalization for sample 2
+stRNAseq_02_plots_2 <- paste0(save_dir, prefixes[2])
+dir.create(stRNAseq_02_plots_2, recursive=TRUE)
+
+# UPLOAD THE OBJECT for sample 2
+QC_matrix_2 <- readRDS(paste0(data_dirs[2],paste0(prefixes[2],"_QC_matrix.rds")))
+
+# Initial normalization for sample 2
+QC_matrix_2 <- NormalizeData(QC_matrix_2, verbose = FALSE)
+
+```
+
+::: info
+Cell cycle scoring
+:::
+
+```{r cell cycle scoring,warning=FALSE}
+# Cell cycle scoring for sample 1
+s.genes <- Seurat::cc.genes.updated.2019$s.genes
+g2m.genes <- Seurat::cc.genes.updated.2019$g2m.genes
+
+QC_matrix_1 <- CellCycleScoring(QC_matrix_1, s.features = s.genes,
+                                     g2m.features = g2m.genes,
+                                     set.ident = TRUE)
+
+QC_matrix_1$cc_difference <- QC_matrix_1$S.Score - QC_matrix_1$G2M.Score
+
+# Split the data according to the cell cycle phase for sample 1
+cell.cycle_1 <- SplitObject(QC_matrix_1, split.by = "Phase")
+
+# Cell cycle scoring for sample 2
+QC_matrix_2 <- CellCycleScoring(QC_matrix_2, s.features = s.genes,
+                                  g2m.features = g2m.genes,
+                                  set.ident = TRUE)
+
+QC_matrix_2$cc_difference <- QC_matrix_2$S.Score - QC_matrix_2$G2M.Score
+
+# Split the data according to the cell cycle phase for sample 2
+cell.cycle_2 <- SplitObject(QC_matrix_2, split.by = "Phase")
+
+```
+
+By looking at reads from chromosomeY (males) and XIST (X-inactive specific transcript) expression (mainly female) it is quite easy to determine per sample which sex it is.
+
+```{r sce fit transform,warning=FALSE}
+sce.filt_2 <- as.SingleCellExperiment(QC_matrix_2)
+sce.filt_1 <- as.SingleCellExperiment(QC_matrix_1)
+```
+
+The pipeline will directly download the genes.table reference data if the file don't exist
+
+```{r sample scoring, warning=FALSE}
+if (!file.exists(genes.file)) {
+  suppressMessages(require(biomaRt))
+  mart <- useMart("ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl")
+  genes.table <- try(biomaRt::getBM(attributes = c("ensembl_gene_id", "external_gene_name",
+                                                   "description", "gene_biotype",
+                                                   "chromosome_name","start_position"), mart = mart,
+                                        useCache = F))
+  if (!dir.exists(genes.file)) {
+    dir.create("~/Projet_Long/Projet_Long_stRNAsq/Data/Reference_Data/")
+  }
+  if (!file.exists(genes.file)) {
+    write.csv(genes.table, file = genes.file)
+  }
+}else{
+  genes.table = read.csv(genes.file)
+}
+```
+
+Let's check the number of genes located on the Y chromosome and the number of genes located on XIST in the reference gene table.
+
+```{r,warning=FALSE}
+chrY.gene <- genes.table$external_gene_name[genes.table$chromosome_name=='Y']
+chrX.gene <- c(genes.table$external_gene_name[grep("*XIST*",genes.table$description)],genes.table$external_gene_name[grep("*XIST*",genes.table$external_gene_name)])
+
+chrY_count <- length(unique(chrY.gene))
+chrX_count <- length(unique(chrX.gene))
+
+# Create a bar plot
+counts <- c(ChrY = chrY_count, XIST = chrX_count)
+barplot(counts, main="Counts of Chromosome Y \nand XIST Genes", col=c("blue", "pink"), ylab="Count of Genes", xlab="Category")
+
+# Add text to show counts directly on the bars for clarity
+text(c(1:length(counts)), counts + 5, labels=counts, pos=3)
+
+```
+
+::: panel-tabset
+## **ColonN_1215002B**
+
+```{r,warning=FALSE}
+# For sample 1
+# Proportion of reads that comes from chromosome Y
+genes.table_1 <- genes.table[genes.table$external_gene_name %in% rownames(sce.filt_1),]
+
+chrY.gene_1 <- genes.table_1$external_gene_name[genes.table_1$chromosome_name == "Y"]
+
+sce.filt_1@colData$pct_chrY <- Matrix::colSums(counts(sce.filt_1)[chrY.gene_1, ])/colSums(counts(sce.filt_1))
+
+sce.filt_1@colData$XIST <- counts(sce.filt_1)["XIST" ]/colSums(counts(sce.filt_1))* 10000
+
+plot1_1 <- plotColData(sce.filt_1, "XIST", "pct_chrY")
+if(save_data){
+  ggplot2::ggsave(filename = " XIST_vs_chrY.png", plot = plot1_1,
+                    scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_02_plots_2)
+}
+
+# In our case, plot_1_1 shows nothing, so we have commented it out.
+#print(plot1_1)
+
+plot2_1 <- plot_grid(plotColData(sce.filt_1, y = "XIST", x = "old.ident", colour_by = "old.ident"),
+                          plotColData(sce.filt_1, y = "pct_chrY", x = "old.ident", colour_by = "old.ident"), ncol = 2)
+if(save_data){
+  ggplot2::ggsave(filename = "sample_sex.png", plot = plot2_1,
+                  scale = 1, width = 20, height = 9, device = "png", path = stRNAseq_02_plots_1)
+
+}
+print(plot2_1)
+
+```
+
+## **CRC_24676A1**
+
+```{r,warning=FALSE}
+# For sample 2
+# Proportion of reads that comes from chromosome Y
+
+genes.table_2 <- genes.table[genes.table$external_gene_name %in% rownames(sce.filt_2),]
+chrY.gene_2 <- genes.table_2$external_gene_name[genes.table_2$chromosome_name == "Y"]
+sce.filt_2@colData$pct_chrY <- Matrix::colSums(counts(sce.filt_2)[chrY.gene_2, ])/colSums(counts(sce.filt_2))
+
+sce.filt_2@colData$XIST <- counts(sce.filt_2)["XIST" ]/colSums(counts(sce.filt_2))* 10000
+
+plot1_2 <- plotColData(sce.filt_2, "XIST", "pct_chrY")
+if(save_data){
+  ggplot2::ggsave(filename = " XIST_vs_chrY.png", plot = plot1_2,
+                    scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_02_plots_2)
+}
+# In our case, plot_1_2 shows nothing, so we have commented it out.
+#print(plot1_2)
+
+plot2_2 <- plot_grid(plotColData(sce.filt_2, y = "XIST", x = "old.ident", colour_by = "old.ident"),
+                       plotColData(sce.filt_2, y = "pct_chrY", x = "old.ident", colour_by = "old.ident"), ncol = 2)
+if(save_data){
+  ggplot2::ggsave(filename = "sample_sex.png", plot = plot2_2,
+                  scale = 1, width = 20, height = 9, device = "png", path = stRNAseq_02_plots_2)
+
+}
+print(plot2_2)
+
+```
+:::
+
+# **SCTransform**
+
+```{r,warning=FALSE}
+# Disables warnings for this code block.
+img_1 <- QC_matrix_1@images  # Saves the image data from the initial Seurat object.
+
+# Converts a SingleCellExperiment object to a Seurat object. This step transforms the gene count data.
+QC_matrix_1 <- as.Seurat(sce.filt_1)
+
+# Adds the saved image data back to the Seurat object under a new slot 'Slice1'.
+QC_matrix_1[['Slice1']] <- img_1
+
+# Applies SCTransform to normalize gene count data in the Seurat object
+SCT_matrix_1 <- SCTransform(QC_matrix_1, assay = 'Spatial', new.assay.name = 'SCT',
+                            vars.to.regress = c('percent.mt', 'nFeature_Spatial', 'cc_difference'),
+                            return.only.var.genes = FALSE, 
+                            variable.features.n = 3000) 
+
+```
+
+```{r ,warning=FALSE}
+# Disables warnings for this code block.
+img_2 <- QC_matrix_2@images  # Saves the image data from the initial Seurat object.
+
+# Converts a SingleCellExperiment object to a Seurat object. This step transforms the gene count data.
+QC_matrix_2 <- as.Seurat(sce.filt_2)
+
+# Adds the saved image data back to the Seurat object under a new slot 'Slice1'.
+QC_matrix_2[['Slice1']] <- img_2
+
+# Applies SCTransform to normalize gene count data in the Seurat object
+SCT_matrix_2 <- SCTransform(QC_matrix_2, assay = 'Spatial', new.assay.name = 'SCT',
+                            vars.to.regress = c('percent.mt', 'nFeature_Spatial', 'cc_difference'),
+                            return.only.var.genes = FALSE, 
+                            variable.features.n = 3000) 
+
+```
+
+::: info
+Combines elements from two Seurat objects and merged
+:::
+
+```{r}
+# This function checks and combines elements from two Seurat objects' lists
+combine_seurat_elements <- function(x, y) {
+  # Retrieve element names from both lists
+  x_names <- names(x)
+  y_names <- names(y)
+  
+  # Loop through each element from the first list
+  for (name in x_names) {
+    # If an element is not in the second list, add it directly
+    if (!(name %in% y_names)) {
+      y[[name]] <- x[[name]]
+    } else {
+      # If the element exists in both, handle merging based on the element type
+      if (name == "meta.data" && "meta.data" %in% y_names) {
+        # Merge metadata data frames, if it's the case
+        # This is an example; specific merging logic depends on your data structure
+        y[["meta.data"]] <- merge(y[["meta.data"]], x[["meta.data"]], by="row.names", all=TRUE)
+      }
+      # Implement custom logic for other shared elements as needed
+    }
+  }
+  return(y)
+}
+
+# Apply function to Seurat objects, combining non-overlapping elements
+# This includes checking for 'images' present in QC_matrix but not in SCT_matrix
+SCT_matrix_1 <- combine_seurat_elements(QC_matrix_1, SCT_matrix_1)
+if ("images" %in% names(QC_matrix_1) && !("images" %in% names(SCT_matrix_1))) {
+  # Directly assign images list if not present in the second object
+  SCT_matrix_1@images <- QC_matrix_1@images
+}
+
+SCT_matrix_2 <- combine_seurat_elements(QC_matrix_2, SCT_matrix_2)
+if ("images" %in% names(QC_matrix_2) && !("images" %in% names(SCT_matrix_2))) {
+  # Directly assign images list if not present in the second object
+  SCT_matrix_2@images <- QC_matrix_2@images
+}
+```
+
+::: info
+Save the results
+:::
+
+```{r Save the results}
+save_results <- function(SCT_matrix,cell_cycle,out_dir, prefix) {
+    # Only proceed with saving if the save_data argument is TRUE.
+  if (save_data) {
+    # Create directories if necessary
+    dir.create(file.path(out_dir, "rds_data/02_SCT/"), recursive = TRUE)
+    dir.create(file.path(out_dir, "log/02_SCT/"), recursive = TRUE)
+    
+    # Save the SCT-transformed matrices and cell cycle data
+    saveRDS(SCT_matrix, file = file.path(out_dir, "rds_data/02_SCT/", paste0(prefix, "_SCT_matrix.rds")))
+    saveRDS(cell_cycle, file = file.path(out_dir, "rds_data/02_SCT/", paste0(prefix, "_cell_cycle_split_matrix.rds")))
+    
+    # Use the logr library to record logging information
+    library(logr)
+    log_file <- file.path(out_dir, "log/02_SCT/", paste0(prefix, "_stRNAseq_02_SCT.log"))
+    log_open(log_file,logdir = F)
+    #log_print("Matrix after SCTransform: ")
+    #put(SCT_matrix, blank_after = TRUE)
+    log_close()
+  }
+}
+
+# Calling the function
+save_results(SCT_matrix_1, cell.cycle_1, out_dirs[1],prefixes[1])
+save_results(SCT_matrix_2, cell.cycle_2, out_dirs[2],prefixes[2])
+
+```

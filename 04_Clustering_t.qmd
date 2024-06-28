@@ -1,0 +1,783 @@
+---
+title: "04_Clustering_t"
+author : Cassandra Gbaboua
+format: html
+editor: visual
+---
+
+# **CLUSTERING**
+
+<!--  Setting up global markdown environment -->
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE)
+```
+
+<!--  Cleaning r environment -->
+
+```{r, include=FALSE}
+#rm(list=ls())
+```
+
+<!-- Loading useful libraries --->
+
+Loading libraries
+
+```{r Loading useful libraries, include=FALSE}
+suppressPackageStartupMessages({
+  #To install Matrix >1.65 : install.packages("Matrix", repos = "http://R-Forge.R-project.org")and restart session
+  library(Seurat)
+  library(ggplot2)
+  library(dplyr)
+  library(cowplot)
+  library(clustree)
+  #library(presto)
+})
+
+set.seed(333)
+```
+
+Set directories and variables
+
+```{r}
+# Chemin du répertoire général
+directory <- '~/Projet_Long/Projet_Long_stRNAsq/'
+setwd(directory)
+
+# Set the name of the sample as a prefix (listing all dataset directories under MyData)
+sample_dirs <- list.files(data_dir, full.names = TRUE)
+prefixes <- basename(sample_dirs)  # Assuming directory names are the prefixes (ex : ColonN_1215002B)
+
+# Data directories for RDS data based on sample prefixes
+data_dirs <- sapply(prefixes, function(x) paste0(directory, "ST_outfiles/", x, "/rds_data/03_DR/"))
+
+# Output directories based on sample prefixes
+out_dirs <- sapply(prefixes, function(x) paste0(directory, "ST_outfiles/", x, "/"))
+
+
+# Save directories for plots based on sample prefixes
+save_dirs <- sapply(prefixes, function(x) paste0(directory, 'plots/04_CL/'))
+
+# File names for the UMAP matrices based on sample prefixes
+files <- sapply(prefixes, function(x) paste0(x, "_UMAP_matrix.rds"))
+
+# True if you want to save plots and files
+save_data <- TRUE
+```
+
+Loading data
+
+```{r,warning=FALSE}
+# Loading the data
+UMAP_data_1 <- readRDS(paste0(data_dirs[1], files[1]))
+# dir where to save images
+stRNAseq_05_plots_1 <- paste0(save_dirs[1], prefixes[1])
+dir.create(stRNAseq_05_plots_1, recursive=TRUE)
+# Loading the data
+UMAP_data_2 <- readRDS(paste0(data_dirs[2], files[2]))
+# dir where to save images
+stRNAseq_05_plots_2<- paste0(save_dirs[2], prefixes[2])
+dir.create(stRNAseq_05_plots_2, recursive=TRUE)
+```
+
+## **Cluster visualization**
+
+::: panel-tabset
+### **ColonN_1215002B**
+
+::: panel-tabset
+```{r GRAPH CLUSTERING-sample1,warning=FALSE}
+neighbors_1 <- FindNeighbors(UMAP_data_1, reduction = "umap", dims = 1:2)
+clusters_data_1 <- FindClusters(neighbors_1, verbose = FALSE)
+```
+
+#### Dim plot
+
+```{r}
+plot1_1 <- DimPlot(clusters_data_1,reduction="pca", label = TRUE)
+plot2_1 <- DimPlot(clusters_data_1,reduction="umap", label = TRUE)
+print(plot2_1)
+
+if(save_data){
+  ggplot2::ggsave(filename = "UMAPClusters.png", plot = plot2_1, 
+                scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_05_plots_1)
+}
+```
+
+#### Clustree
+
+```{r}
+plot_clustree_1 <- clustree::clustree(clusters_data_1@meta.data, prefix = "SCT_snn_res.")
+
+if(save_data){
+  ggplot2::ggsave(filename = "SCT_snn_res.png", plot = plot_clustree_1, 
+                scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_05_plots_1)
+}
+print(plot_clustree_1)
+
+```
+
+#### UMAP by Cluster
+
+```{r}
+UMAP_by_cluster_1 <- DimPlot(clusters_data_1, reduction = "umap", label = TRUE) + ggtitle(paste0("UMAP by Cluster for",prefixes[1]))
+
+if(save_data){
+  ggplot2::ggsave(plot=UMAP_by_cluster_1, filename= "UMAP_by_cluster.png", path= stRNAseq_05_plots_1, width=5, height=4)
+}
+
+print(UMAP_by_cluster_1)
+
+```
+
+#### Violin plot
+
+```{r}
+table(clusters_data_1@meta.data$seurat_clusters)
+vio_1 <- VlnPlot(clusters_data_1, features = "nCount_Spatial")
+
+if(save_data){
+  ggplot2::ggsave(plot=vio_1, filename= "nCount_by_cluster.png", path= stRNAseq_05_plots_1, width=5, height=4)
+}
+
+print(vio_1)
+```
+
+#### Frequency plot
+
+```{r}
+## save clusters
+clusters_1 <- clusters_data_1$seurat_clusters
+clust_1_df <- data.frame(Barcode = colnames(clusters_data_1), Cluster = clusters_1)
+
+if(save_data){
+  write.csv(x = clust_1_df, file = paste0(stRNAseq_05_plots_1, "/umap_clusters.csv"),
+          quote=FALSE, row.names = F)
+}
+
+# Calculating relative frequency of each cluster
+cluster_freq_1 <- clusters_data_1@meta.data %>%
+  group_by(seurat_clusters) %>%
+  summarise(count = n()) %>%
+  mutate(relative_freq = count / sum(count)) %>%
+  mutate(data_set = prefixes[1])
+
+# Plotting cluster frequency
+freq_plot_1 <- ggplot(cluster_freq_1, aes(x = data_set, y = relative_freq, fill = seurat_clusters)) +
+  geom_col() +
+  ggtitle(paste0("Cluster Frequency for",prefixes[1]))
+
+if(save_data){
+  ggplot2::ggsave(filename = "UMAP_RF.png", plot = freq_plot_1, 
+                scale = 1, width = 6, height = 9, device = "png", path = stRNAseq_05_plots_1)
+}
+```
+
+```{r}
+print(freq_plot_1)
+```
+:::
+
+### **CRC_24676A1**
+
+::: panel-tabset
+```{r GRAPH CLUSTERING-2}
+neighbors_2 <- FindNeighbors(UMAP_data_2, reduction = "umap", dims = 1:2)
+clusters_data_2 <- FindClusters(neighbors_2, verbose = FALSE)
+```
+
+#### Dim plot
+
+```{r}
+plot1_2 <- DimPlot(clusters_data_2, reduction="pca", label = TRUE)
+plot2_2 <- DimPlot(clusters_data_2, reduction="umap", label = TRUE)
+
+if(save_data){
+  ggplot2::ggsave(filename = "UMAPClusters.png", plot = plot2_2, 
+                scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_05_plots_2)
+}
+
+print(plot2_2)
+```
+
+#### Clustree
+
+```{r}
+plot_clustree_2 <- clustree::clustree(clusters_data_2@meta.data, prefix = "SCT_snn_res.")
+
+if(save_data){
+  ggplot2::ggsave(filename = "SCT_snn_res.png", plot = plot_clustree_2, 
+                scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_05_plots_2)
+}
+
+print(plot_clustree_2)
+```
+
+#### UMAP by Cluster
+
+```{r}
+UMAP_by_cluster_2 <- DimPlot(clusters_data_2, reduction = "umap", label = TRUE) + ggtitle(paste0("UMAP by Cluster for",prefixes[2]))
+
+if(save_data){
+  ggplot2::ggsave(plot=UMAP_by_cluster_2, filename= "UMAP_by_cluster.png", path= stRNAseq_05_plots_2, width=5, height=4)
+}
+
+print(UMAP_by_cluster_2)
+
+```
+
+#### Violin Plot
+
+```{r}
+table(clusters_data_2@meta.data$seurat_clusters)
+vio_2 <- VlnPlot(clusters_data_2, features = "nCount_Spatial")
+
+if(save_data){
+  ggplot2::ggsave(plot=vio_2, filename= "nCount_by_cluster.png", path= stRNAseq_05_plots_2, width=5, height=4)
+}
+
+print(vio_2)
+```
+
+#### Frequency plot
+
+```{r}
+## save clusters
+clusters_2 <- clusters_data_2$seurat_clusters
+clust_2_df <- data.frame(Barcode = colnames(clusters_data_2), Cluster = clusters_2)
+
+if(save_data){
+  write.csv(x = clust_2_df, file = paste0(stRNAseq_05_plots_2, "/umap_clusters.csv"),
+            quote=FALSE, row.names = F)
+}
+
+# Calculating relative frequency of each cluster
+cluster_freq_2 <- clusters_data_2@meta.data %>%
+  group_by(seurat_clusters) %>%
+  summarise(count = n()) %>%
+  mutate(relative_freq = count / sum(count)) %>%
+  mutate(data_set = prefixes[2])
+
+# Plotting cluster frequency
+freq_plot_2 <- ggplot(cluster_freq_2, aes(x = data_set, y = relative_freq, fill = seurat_clusters)) +
+  geom_col() +
+  ggtitle(paste0("Cluster Frequency for",prefixes[2]))
+
+if(save_data){
+  ggplot2::ggsave(filename = "UMAP_RF.png", plot = freq_plot_2, 
+                  scale = 1, width = 6, height = 9, device = "png", path = stRNAseq_05_plots_2)
+}
+```
+
+```{r}
+print(freq_plot_2)
+```
+:::
+:::
+
+## **K-means Clustering**
+
+::: panel-tabset
+### **ColonN_1215002B**
+
+::: panel-tabset
+#### K-means visualization
+
+```{r K-MEANS CLUSTERING-sample1,fig.height=10}
+UMAP_data_km_1 <- UMAP_data_1
+    
+for (k in seq(2,10)) {
+  UMAP_data_km_1@meta.data[, paste0("kmeans_", k)] <- kmeans(x = UMAP_data_km_1@reductions[["pca"]]@cell.embeddings,
+                                                           centers = k, nstart = 100, iter.max = 15)$cluster
+}
+
+if(save_data){
+  for (k in seq(2,10)){
+    ggplot2::ggsave(filename = paste0("kmeans_", k, "_clusters.png"), 
+                  plot = DimPlot(UMAP_data_km_1, reduction = "umap", group.by = paste0("kmeans_", k)) +
+                    ggtitle(paste0("kmeans_", k)), 
+                  scale = 1, width = 9, height = 9, device = "png", path = paste0(stRNAseq_05_plots_1, "/k_means/"))
+  }
+}
+# Initialisation de la liste pour stocker les plots
+plot_list_1 <- list()
+
+# Génération des plots et stockage dans la liste
+for (k in seq(2, 10)) {
+  plot_kmeans_1 <- DimPlot(UMAP_data_km_1, reduction = "umap", group.by = paste0("kmeans_", k)) +
+                        ggtitle(paste0("K-means ", k, " Clusters"))
+  plot_list_1[[k-1]] <- plot_kmeans_1
+}
+
+# Combinaison des plots en une grille
+combined_plot_1 <- plot_grid(plotlist = plot_list_1, ncol = 3, nrow = 3, labels = "AUTO")
+print(combined_plot_1)
+```
+
+#### Cluster tree
+
+```{r}
+plot_clustree_1 <- clustree(UMAP_data_km_1@meta.data, prefix = "kmeans_")
+
+if(save_data){
+  ggplot2::ggsave(filename = "clustree.png", plot = plot_clustree_1, 
+                scale = 1, width = 9, height = 16, device = "png", path = paste0(stRNAseq_05_plots_1, "/k_means/"))
+}
+
+print(plot_clustree_1)
+
+```
+:::
+
+### **CRC_24676A1**
+
+::: panel-tabset
+#### K-means visualization
+
+```{r K-MEANS CLUSTERING-sample2,fig.height=10}
+UMAP_data_km_2 <- UMAP_data_2
+wss <- numeric(length = 9)
+for (k in seq(2,10)) {
+  kmeans_result <- kmeans(x = UMAP_data_km_1@reductions[["pca"]]@cell.embeddings, centers = k, nstart = 100, iter.max = 15)
+  wss[k-1] <-  kmeans_result$tot.withinss
+  UMAP_data_km_2@meta.data[, paste0("kmeans_", k)] <- kmeans(x = UMAP_data_km_2@reductions[["pca"]]@cell.embeddings,
+                                                             centers = k, nstart = 100, iter.max = 15)$cluster
+}
+
+if(save_data){
+  for (k in seq(2,10)){
+    ggplot2::ggsave(filename = paste0("kmeans_", k, "_clusters.png"), 
+                    plot = DimPlot(UMAP_data_km_2, reduction = "umap", group.by = paste0("kmeans_", k)) +
+                      ggtitle(paste0("kmeans_", k)), 
+                    scale = 1, width = 9, height = 9, device = "png", path = paste0(stRNAseq_05_plots_2, "/k_means/"))
+  }
+}
+# Initialisation de la liste pour stocker les plots
+plot_list_2 <- list()
+
+# Génération des plots et stockage dans la liste
+for (k in seq(2, 10)) {
+  plot_kmeans_2 <- DimPlot(UMAP_data_km_2, reduction = "umap", group.by = paste0("kmeans_", k)) +
+    ggtitle(paste0("K-means ", k, " Clusters"))
+  plot_list_2[[k-1]] <- plot_kmeans_2
+}
+
+# Combinaison des plots en une grille
+combined_plot_2 <- plot_grid(plotlist = plot_list_2, ncol = 3, nrow = 3, labels = "AUTO")
+print(combined_plot_2)
+```
+
+#### Cluster tree
+
+```{r}
+plot_clustree_2 <- clustree(UMAP_data_km_2@meta.data, prefix = "kmeans_")
+
+if(save_data){
+  ggplot2::ggsave(filename = "clustree.png", plot = plot_clustree_2, 
+                  scale = 1, width = 9, height = 16, device = "png", path = paste0(stRNAseq_05_plots_2, "/k_means/"))
+}
+
+print(plot_clustree_2)
+```
+:::
+:::
+
+## **Hierarchical clustering**
+
+::: panel-tabset
+### **ColonN_1215002B**
+
+::: panel-tabset
+```{r HIERARCHICAL CLUSTERING-sample1}
+# Defining distance between cells and Compute sample correlations for prefixes[1]
+UMAP_data_hc_1 <- UMAP_data_1
+d_1 <- dist(UMAP_data_hc_1@reductions[["pca"]]@cell.embeddings, method = "euclidean")
+sample_cor_1 <- cor(Matrix::t(UMAP_data_hc_1@reductions[["pca"]]@cell.embeddings))
+
+# Transform the scale from correlations
+sample_cor_1 <- (1 - sample_cor_1)/2
+# Convert it to a distance object
+d2_1 <- as.dist(sample_cor_1)
+
+h_euclidean_1 <- hclust(d_1, method = "ward.D2")
+h_correlation_1 <- hclust(d2_1, method = "ward.D2")
+
+for (k in seq(2,10)) {
+  UMAP_data_hc_1[[paste0("hc_euclidean_", k)]] <- cutree(h_euclidean_1, k = k)
+  UMAP_data_hc_1[[paste0("hc_corelation_", k)]] <- cutree(h_correlation_1, k = k)
+}
+
+if(save_data){
+  # save the plots
+  for (k in seq(2,10)){
+    ggplot2::ggsave(filename = paste0("hc_euclidean_", k, "_clusters"), 
+                    plot = DimPlot(UMAP_data_hc_1, reduction = "umap", 
+                                   group.by = paste0("hc_euclidean_", k)) +
+                      ggtitle(paste0("hc_euc_", k)), 
+                    scale = 1, width = 9, height = 9, device = "png", 
+                    path = paste0(stRNAseq_05_plots_1, "/hc/"))
+    
+    ggplot2::ggsave(filename = paste0("hc_corelation_", k, "_clusters"), 
+                    plot = DimPlot(UMAP_data_hc_1, reduction = "umap", 
+                                   group.by = paste0("hc_corelation_", k)) +
+                      ggtitle(paste0("hc_cor_", k)), 
+                    scale = 1, width = 9, height = 9, device = "png", 
+                    path = paste0(stRNAseq_05_plots_1, "/hc/"))
+  }
+}
+
+# Génération des plots pour les clusters formés à différentes valeurs de k pour Euclidean
+plot_list_1_euclidean <- list()
+plot_list_1_correlation <- list()
+for (k in seq(2,10)) {
+  # Création de DimPlots pour chaque coupure basée sur Euclidean
+  cluster_labels_euclidean <- cutree(h_euclidean_1, k = k)
+  UMAP_data_hc_1@meta.data$cluster_euclidean <- factor(cluster_labels_euclidean)
+  plot_euclidean_k <- DimPlot(UMAP_data_hc_1, group.by = "cluster_euclidean", label = TRUE) + ggtitle(paste("Euclidean k =", k))
+  plot_list_1_euclidean[[k-1]] <- plot_euclidean_k
+
+  # Création de DimPlots pour chaque coupure basée sur Correlation
+  cluster_labels_correlation <- cutree(h_correlation_1, k = k)
+  UMAP_data_hc_1@meta.data$cluster_correlation <- factor(cluster_labels_correlation)
+  plot_correlation_k <- DimPlot(UMAP_data_hc_1, group.by = "cluster_correlation", label = TRUE) + ggtitle(paste("Correlation k =", k))
+  plot_list_1_correlation[[k-1]] <- plot_correlation_k
+}
+
+```
+
+#### Hierarchical tree (Euclidean)
+
+```{r,fig.height=10}
+# Affichage des plots en grille
+combined_plot_1_euclidean <- cowplot::plot_grid(plotlist = plot_list_1_euclidean, ncol = 3)
+print(combined_plot_1_euclidean)
+
+```
+
+#### Hierarchical tree (Correlation)
+
+```{r,fig.height=10}
+combined_plot_1_correlation <- cowplot::plot_grid(plotlist = plot_list_1_correlation, ncol = 3)
+print(combined_plot_1_correlation)
+```
+:::
+
+### **CRC_24676A1**
+
+::: panel-tabset
+```{r HIERARCHICAL-sample2}
+# Defining distance between cells and Compute sample correlations for prefixes[1]
+UMAP_data_hc_2 <- UMAP_data_2
+d_2 <- dist(UMAP_data_hc_2@reductions[["pca"]]@cell.embeddings, method = "euclidean")
+sample_cor_2 <- cor(Matrix::t(UMAP_data_hc_2@reductions[["pca"]]@cell.embeddings))
+
+# Transform the scale from correlations
+sample_cor_2 <- (1 - sample_cor_2)/2
+# Convert it to a distance object
+d2_2 <- as.dist(sample_cor_2)
+
+h_euclidean_2 <- hclust(d_2, method = "ward.D2")
+h_correlation_2 <- hclust(d2_2, method = "ward.D2")
+
+for (k in seq(2,10)) {
+  UMAP_data_hc_2[[paste0("hc_euclidean_", k)]] <- cutree(h_euclidean_2, k = k)
+  UMAP_data_hc_2[[paste0("hc_corelation_", k)]] <- cutree(h_correlation_2, k = k)
+}
+
+if(save_data){
+  # save the plots
+  for (k in seq(2,10)){
+    ggplot2::ggsave(filename = paste0("hc_euclidean_", k, "_clusters"), 
+                    plot = DimPlot(UMAP_data_hc_2, reduction = "umap", 
+                                   group.by = paste0("hc_euclidean_", k)) +
+                      ggtitle(paste0("hc_euc_", k)), 
+                    scale = 1, width = 9, height = 9, device = "png", 
+                    path = paste0(stRNAseq_05_plots_2, "/hc/"))
+    
+    ggplot2::ggsave(filename = paste0("hc_corelation_", k, "_clusters"), 
+                    plot = DimPlot(UMAP_data_hc_2, reduction = "umap", 
+                                   group.by = paste0("hc_corelation_", k)) +
+                      ggtitle(paste0("hc_cor_", k)), 
+                    scale = 1, width = 9, height = 9, device = "png", 
+                    path = paste0(stRNAseq_05_plots_2, "/hc/"))
+  }
+}
+
+# Génération des plots pour les clusters formés à différentes valeurs de k pour Euclidean
+plot_list_2_euclidean <- list()
+plot_list_2_correlation <- list()
+for (k in seq(2,10)) {
+  # Création de DimPlots pour chaque coupure basée sur Euclidean
+  cluster_labels_euclidean <- cutree(h_euclidean_2, k = k)
+  UMAP_data_hc_2@meta.data$cluster_euclidean <- factor(cluster_labels_euclidean)
+  plot_euclidean_k <- DimPlot(UMAP_data_hc_2, group.by = "cluster_euclidean", label = TRUE) + ggtitle(paste("Euclidean k =", k))
+  plot_list_2_euclidean[[k-1]] <- plot_euclidean_k
+  
+  # Création de DimPlots pour chaque coupure basée sur Correlation
+  cluster_labels_correlation <- cutree(h_correlation_2, k = k)
+  UMAP_data_hc_2@meta.data$cluster_correlation <- factor(cluster_labels_correlation)
+  plot_correlation_k <- DimPlot(UMAP_data_hc_2, group.by = "cluster_correlation", label = TRUE) + ggtitle(paste("Correlation k =", k))
+  plot_list_2_correlation[[k-1]] <- plot_correlation_k
+}
+```
+
+#### Hierarchical tree (Euclidean)
+
+```{r,fig.height=10,fig.width=10}
+# Affichage des plots en grille
+combined_plot_2_euclidean <- cowplot::plot_grid(plotlist = plot_list_2_euclidean, ncol = 3)
+print(combined_plot_2_euclidean)
+```
+
+#### Hierarchical tree (Correlation)
+
+```{r,fig.height=10,fig.width=10}
+# Affichage des plots en grille
+combined_plot_2_euclidean <- cowplot::plot_grid(plotlist = plot_list_2_euclidean, ncol = 3)
+print(combined_plot_2_euclidean)
+```
+:::
+:::
+
+## **Markers identification**
+
+::: panel-tabset
+### **ColonN_1215002B**
+
+::: panel-tabset
+```{r MARKERS IDENTIFICATION-1}
+cluster_data_1 <- clusters_data_1
+
+cl_markers_1 <- FindAllMarkers(cluster_data_1, 
+                                 min.pct = 0.25, 
+                                 logfc.threshold = log(0.25),
+                                 only.pos = TRUE)
+
+cl_markers_1 <- subset(cl_markers_1, cl_markers_1$p_val_adj<0.05)
+
+if(save_data){
+    # Save all the markers for each cluster
+  dir.create(paste0(stRNAseq_05_plots_1,"/Markers"), recursive=TRUE)
+  write.table(cl_markers_1, file = paste0(stRNAseq_05_plots_1,"/Markers/all_markers.txt"))
+
+}
+```
+
+#### Marker data
+
+```{r}
+print(head(cl_markers_1, n = 5))
+```
+
+#### Top specific markers plot
+
+```{r,fig.height=10}
+top_specific_markers_1 <- cl_markers_1 %>% group_by(cluster) %>% top_n(n = 3, wt = avg_log2FC)
+
+top_genes_1 <- cl_markers_1 %>% 
+  group_by(cluster) %>% 
+  top_n(1, avg_log2FC) %>% 
+  pull(gene)
+
+plot3_1 <- FeaturePlot(cluster_data_1, features=top_genes_1, cols = c("lightgrey", "red"), pt.size=0.25, 
+                     combine = T)
+print(plot3_1)
+
+```
+
+#### Violin plot
+
+```{r,fig.height=13}
+plot4_1 <- VlnPlot(cluster_data_1, features=top_genes_1, pt.size=0.25,ncol=3) 
+print(plot4_1)
+```
+
+#### Ridge plot
+
+```{r,fig.height=13}
+plot5_1 <- RidgePlot(cluster_data_1, features=top_genes_1,ncol=3)
+print(plot5_1)
+```
+
+#### Expression dot plot
+
+```{r}
+plot1_1 <- DotPlot(cluster_data_1, features=unique(top_genes_1), cols=c('lightgrey', 'red')) + 
+  theme(axis.text = element_text(angle=45, hjust=1))
+print(plot1_1)
+```
+
+#### Expression heatmap
+
+```{r,fig.height=13,fig.width=10}
+top_10_genes_1 <- cl_markers_1 %>% 
+  group_by(cluster) %>% 
+  top_n(10, avg_log2FC) %>% 
+  pull(gene) %>%
+  unique()
+
+top10_markers_heatmap_1 <- DoHeatmap(cluster_data_1, features = top_10_genes_1) +
+  scale_fill_gradientn(colors = c("blue", "black", "red")) +
+  ggtitle(paste0("Top 10 Markers Heatmap for" ,prefixes[2]))
+print(top10_markers_heatmap_1)
+```
+
+Save the data
+
+```{r}
+if(save_data){
+  ggplot2::ggsave(filename = "top1_genes_FeaturePlot.png", plot = plot3_1, 
+                scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_05_plots_1)
+  ggplot2::ggsave(filename = "top1_genes_VlnPlot.png", plot = plot4_1, 
+                scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_05_plots_1)
+  ggplot2::ggsave(filename = "top1_genes_RidgePlot.png", plot = plot5_1, 
+                scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_05_plots_1)
+  ggplot2::ggsave(filename = "top_genes_DotPlot.png", plot = plot1_1, 
+                scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_05_plots_1)
+  write.table(top_10_genes_1, file = paste0(stRNAseq_05_plots_1,"/Markers/top10_markers.txt"))
+  ggplot2::ggsave(filename = "Top10_markers_heatmap.png", plot = top10_markers_heatmap_1, 
+                scale = 1, width = 16, height = 16, device = "png", path = stRNAseq_05_plots_1)
+
+  
+}
+```
+:::
+
+### **CRC_24676A1** {.panel-tabset}
+
+::: panel-tabset
+```{r}
+cluster_data_2 <- clusters_data_2
+
+cl_markers_2 <- FindAllMarkers(cluster_data_2, 
+                               min.pct = 0.25, 
+                               logfc.threshold = log(0.25),
+                               only.pos = TRUE)
+
+cl_markers_2 <- subset(cl_markers_2, cl_markers_2$p_val_adj<0.05)
+
+if(save_data){
+  # Save all the markers for each cluster
+  dir.create(paste0(stRNAseq_05_plots_2,"/Markers"), recursive=TRUE)
+  write.table(cl_markers_2, file = paste0(stRNAseq_05_plots_2,"/Markers/all_markers.txt"))
+  
+}
+
+```
+
+#### Marker data
+
+```{r}
+print(head(cl_markers_2, n = 5))
+```
+
+#### Top specific markers plot
+
+```{r,fig.height=10,fig.width=10}
+top_specific_markers_2 <- cl_markers_2 %>% group_by(cluster) %>% top_n(n = 3, wt = avg_log2FC)
+
+top_genes_2 <- cl_markers_2 %>% 
+  group_by(cluster) %>% 
+  top_n(1, avg_log2FC) %>% 
+  pull(gene)
+
+plot3_2 <- FeaturePlot(cluster_data_2, features=top_genes_2, cols = c("lightgrey", "red"), pt.size=0.25, 
+                       combine = T)
+print(plot3_2)
+
+```
+
+#### Violin plot
+
+```{r,fig.height=15}
+plot4_2 <- VlnPlot(cluster_data_2, features=top_genes_2, pt.size=0.25,ncol=3) 
+print(plot4_2)
+```
+
+#### Ridge plot
+
+```{r,fig.height=15,fig.width=12}
+plot5_2 <- RidgePlot(cluster_data_2, features=top_genes_2,ncol=3)
+print(plot5_2)
+```
+
+#### Expression dot plot
+
+```{r}
+plot1_2 <- DotPlot(cluster_data_2, features=unique(top_genes_2), cols=c('lightgrey', 'red')) + 
+  theme(axis.text = element_text(angle=45, hjust=1))
+print(plot1_2)
+```
+
+#### Expression heatmap
+
+```{r,fig.height=16,fig.width=10}
+top_10_genes_2 <- cl_markers_2 %>% 
+  group_by(cluster) %>% 
+  top_n(10, avg_log2FC) %>% 
+  pull(gene) %>%
+  unique()
+
+top10_markers_heatmap_2 <- DoHeatmap(cluster_data_2, features = top_10_genes_2) +
+  scale_fill_gradientn(colors = c("blue", "black", "red")) +
+  ggtitle(paste0("Top 10 Markers Heatmap for" ,prefixes[2]))
+print(top10_markers_heatmap_2)
+```
+:::
+
+Save data
+
+```{r}
+if(save_data){
+  ggplot2::ggsave(filename = "top1_genes_FeaturePlot.png", plot = plot3_2, 
+                  scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_05_plots_2)
+  ggplot2::ggsave(filename = "top1_genes_VlnPlot.png", plot = plot4_2, 
+                  scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_05_plots_2)
+  ggplot2::ggsave(filename = "top1_genes_RidgePlot.png", plot = plot5_2, 
+                  scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_05_plots_2)
+  ggplot2::ggsave(filename = "top_genes_DotPlot.png", plot = plot1_2, 
+                  scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_05_plots_2)
+  write.table(top_10_genes_2, file = paste0(stRNAseq_05_plots_2,"/Markers/top10_markers.txt"))
+  ggplot2::ggsave(filename = "Top10_markers_heatmap.png", plot = top10_markers_heatmap_2, 
+                  scale = 1, width = 16, height = 16, device = "png", path = stRNAseq_05_plots_2)
+}
+```
+:::
+
+Save the results
+
+```{r}
+saveClusteringResults <- function(cluster_data_UMAP, UMAP_data_km, UMAP_data_hc, save_dir, out_dir, prefix, save_data) {
+  if (save_data) {
+    # Directories for saving RDS data and logs
+    dir.create(save_dir, recursive = TRUE)
+    dir.create(paste0(out_dir,"log/04_CL/"), recursive = TRUE)
+    dir.create(file.path(out_dir, "rds_data/04_CL/"), recursive = TRUE)
+
+
+    # Save RDS files
+    saveRDS(cluster_data_UMAP, file = file.path(paste0(out_dir,"rds_data/04_CL/",prefix, "_Snn_matrix.rds")))
+    saveRDS(UMAP_data_km, file = file.path(paste0(out_dir,"rds_data/04_CL/", prefix, "_kmeans_matrix.rds")))
+    saveRDS(UMAP_data_hc, file =  file.path(paste0(out_dir,"rds_data/04_CL/",prefix, "_hc_matrix.rds")))
+
+    # Using the logr library to record logging information
+    library(logr)
+    log_file <- file.path(paste0(out_dir,"log/04_CL/",prefix, "_Clusters.log"))
+    log_open(log_file,logdir = F)
+
+    #log_print("Graph Clustering parameters: ")
+    #put(cluster_data_UMAP, blank_after = TRUE)
+
+    #log_print("New matrix after K-means clustering: ")
+    #put(UMAP_data_km, blank_after = TRUE)
+
+    #log_print("New matrix after hierarchical clustering: ")
+    #put(UMAP_data_hc, blank_after = TRUE)
+
+    log_close()
+  }
+}
+
+saveClusteringResults(cluster_data_1,UMAP_data_km_1,UMAP_data_hc_1,save_dirs[1],out_dirs[1],prefixes[1],save_data)
+saveClusteringResults(cluster_data_2,UMAP_data_km_2,UMAP_data_hc_2,save_dirs[2],out_dirs[2],prefixes[2],save_data)
+```

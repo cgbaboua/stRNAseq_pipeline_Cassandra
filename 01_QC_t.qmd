@@ -1,0 +1,564 @@
+---
+title: "01_QC_t"
+author: "Cassandra Gbaboua"
+format: html
+editor: visual
+---
+
+# **QUALITY CONTROL**
+
+<!--  Setting up global markdown environment -->
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE)
+```
+
+<!--  Cleaning r environment -->
+
+```{r Cleaning r environment, include=FALSE}
+#rm(list=ls())
+```
+
+<!-- Loading useful libraries --->
+
+::: info
+Loading useful libraries
+:::
+
+```{r libraries}
+suppressPackageStartupMessages({
+  if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+  library(ggplot2)
+  #To install Matrix >1.65 : install.packages("Matrix", repos = "http://R-Forge.R-project.org") and restart session
+  library(Seurat)
+  library(biomaRt)
+  library(gridExtra)
+  # devtools::install_github("https://github.com/ElyasMo/ST.mtx")
+  # library(ST.mtx)
+})
+```
+
+Set directories and variables
+
+```{r}
+# *** MODIFY HERE ****
+# Set the directories and variables for the correct execution of the code
+# General directory
+directory <- '~/Projet_Long/Projet_Long_stRNAsq/'
+setwd(directory)
+
+# Data directory
+data_dir <- paste0(directory, 'Data/MyData/')
+
+# Set the name of the sample as a prefix (listing all dataset directories under MyData)
+sample_dirs <- list.files(data_dir, full.names = TRUE)
+prefixes <- basename(sample_dirs)  # Assuming directory names are the prefixes (ex : ColonN_1215002B)
+
+# Output directories
+out_dirs <- sapply(prefixes, function(x) paste0(directory, "ST_outfiles/", x, "/"))
+invisible(sapply(out_dirs, dir.create, recursive = TRUE))
+
+
+# Metadata directory, if available
+# Use the following code to specify the availability of the metadata and to specify the path to it
+metadata <- FALSE
+meta_path <- ""
+
+# Statistics files before and after QC and filtering
+csv_fnames <- sapply(prefixes, function(x) paste0(out_dirs[names(out_dirs) == x], "QC_stat.csv"))
+
+# True if you want to save plots and files
+save_data <- TRUE
+```
+
+Path for plots
+
+```{r}
+# Construct a path for QC plots specific to CRC_24676A1 and create the directory if it doesn't exist
+stRNAseq_01_plots_1 <- paste0(directory, 'plots/01_QC/', prefixes[1],'/')
+  
+# UPLOAD THE OBJECT for CRC_24676A1
+sparse_matrix_1 <- CreateSeuratObject(
+  counts = Read10X(paste0(data_dir,prefixes[1],"/filtered_feature_bc_matrix/")),
+  assay = 'Spatial', project = prefixes[1]
+)
+
+image_1<- Read10X_Image(image.dir = paste0(data_dir, prefixes[1],"/spatial/"))
+image_1 <- image_1[Cells(x = sparse_matrix_1)]
+DefaultAssay(object = image_1) <- 'Spatial'
+sparse_matrix_1[['Slice1']] <- image_1
+
+#print(sparse_matrix_1@assays$RNA)
+#print(sparse_matrix_1@assays$Spatial)
+```
+
+```{r}
+# Construct a path for QC plots specific to ColonN_1215002B and create the directory if it doesn't exist
+stRNAseq_01_plots_2 <- paste0(directory, 'plots/01_QC/', prefixes[2],'/')
+  
+# UPLOAD THE OBJECT for ColonN_1215002B
+sparse_matrix_2 <- CreateSeuratObject(
+  counts = Read10X(paste0(data_dir, prefixes[2], "/filtered_feature_bc_matrix/")),
+  assay = 'Spatial', project = prefixes[2]
+)
+
+image_2 <- Read10X_Image(image.dir = paste0(data_dir, prefixes[2], "/spatial/"))
+image_2 <- image_2[Cells(x = sparse_matrix_2)]
+DefaultAssay(object = image_2) <- 'Spatial'
+sparse_matrix_2[['Slice1']] <- image_2
+
+#print(sparse_matrix_2@assays$RNA)
+#print(sparse_matrix_2@assays$Spatial)
+```
+
+Extract references genes.table
+
+```{r}
+# Extract the list of gene names from the spatial assay of the Seurat object.
+# These names will be used to retrieve further annotations from an external database.
+genes_list <- rownames(sparse_matrix_1@assays$Spatial)
+# Set up a connection to the Ensembl BioMart database for Homo sapiens (human).
+# Ensembl is a comprehensive source of genomic data and the 'hsapiens_gene_ensembl' dataset
+# provides a wide range of gene-specific information including annotations.
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+# Retrieve gene annotations using the list of gene names. The attributes fetched include
+# the external gene name and a description of each gene. The 'external_gene_name' is used as a filter
+# to match the gene names in your list, ensuring that the returned annotations correspond to your genes.
+annotations <- getBM(attributes = c('external_gene_name', 'description'),
+                     filters = 'external_gene_name',
+                     values = genes_list,
+                     mart = ensembl)
+
+# Create a comprehensive dataframe combining the original list of gene names with the annotations retrieved.
+# This merge ensures that every gene in the original list is included in the dataframe, with 'NA' for any
+# missing descriptions in the annotations. This is critical for ensuring no gene is left out of subsequent analyses.
+complete_annotations <- merge(data.frame(genes_list), annotations, by.x="genes_list", by.y="external_gene_name", all.x=TRUE)
+
+# Remove any duplicate entries based on the gene names to ensure each gene is represented only once.
+# This step is necessary to prevent redundancy in the data, which could affect the analysis.
+complete_annotations <- complete_annotations[!duplicated(complete_annotations$genes_list), ]
+
+# This processed data structure is particularly useful for identifying genes associated with specific functions or
+# cellular components, such as mitochondrial, ribosomal, or hemoglobin genes, based on their descriptions.
+```
+
+<!-- Uncomment if needed -->
+
+```{r}
+#write.csv(complete_annotations,file = "complete_annotations.csv")
+```
+
+```{r}
+# Function to process QC and calculate initial statistics
+process_data <- function(sparse_matrix,complete_annotations) {
+  genes_list <- rownames(sparse_matrix@assays$Spatial)
+  # Mitochondrial genes
+  indices_genes = grep("^MT|MT$", complete_annotations$genes_list, ignore.case = TRUE)
+  indices_desc = grep("mitochondria*", complete_annotations$description, ignore.case = TRUE)
+  combined_indices = unique(c(indices_genes, indices_desc))
+  
+  mt_genes = paste(complete_annotations$genes_list[combined_indices],collapse = "|")
+  
+  sparse_matrix[["percent.mt"]] <- PercentageFeatureSet(sparse_matrix, pattern = mt_genes)
+
+  # Ribosomal genes
+  indices_ribosomal_genes = grep("^RPS|^RPL|^RP[SL]", complete_annotations$genes_list, ignore.case = TRUE)
+  indices_ribosomal_desc = grep("ribosom*", complete_annotations$description, ignore.case = TRUE)
+  combined_indices_ribosomal = unique(c(indices_ribosomal_genes, indices_ribosomal_desc))
+  
+  ribosomal_list = paste(complete_annotations$genes_list[combined_indices_ribosomal],collapse = "|")
+  
+  sparse_matrix[["percent.rb"]] <- PercentageFeatureSet(sparse_matrix, pattern = ribosomal_list)
+
+  # Hemoglobin genes
+  indices_hemoglobin_genes = grep("^HB[^(P)]", complete_annotations$genes_list, perl = TRUE)
+  indices_hemoglobin_desc = grep("hemoglobin", complete_annotations$description, ignore.case = TRUE)
+  combined_indices_hemoglobin = unique(c(indices_hemoglobin_genes, indices_hemoglobin_desc))
+  
+  hemoglobin_list = paste(complete_annotations$genes_list[combined_indices_hemoglobin],collapse = "|")
+  
+  sparse_matrix[["percent.globin"]] <- PercentageFeatureSet(sparse_matrix, pattern = hemoglobin_list)
+
+  # number of genes detected per UMI
+  sparse_matrix$log10GenesPerUMI <- log10(sparse_matrix$nFeature_Spatial) / log10(sparse_matrix$nCount_Spatial)
+
+  return(sparse_matrix)
+}
+# Process ColonN_1215002B
+results_1 <- process_data(sparse_matrix_1,complete_annotations)
+# Process CRC_24676A1
+results_2 <- process_data(sparse_matrix_2,complete_annotations)
+```
+
+Save data
+
+```{r}
+saveInitialStats <- function(sparse_matrix,csv_fname,prefix){
+  # number of spots per sample
+  spots <- ncol(x = sparse_matrix)
+  
+  # number of genes
+  features <- nrow(x = sparse_matrix)
+  
+  # median genes per spot
+  genes <- median(sparse_matrix$nFeature_Spatial)
+  
+  # median reads per spot -> median of nCount_Spatial
+  reads <- median(sparse_matrix$nCount_Spatial)
+  
+  # save the initial statistics in a csv file
+  time <- "initial"
+  if (file.exists(csv_fname)){
+    row <- data.frame(time, prefix, features, spots, reads, genes)
+    # writing row in the csv file
+    write.table(row, file = csv_fname, sep = " ",
+                append = TRUE, quote = FALSE,
+                col.names = FALSE, row.names = FALSE)
+  }else{
+    # defining the data for the csv file 
+    data = data.frame(Status = time,
+                      Sample = prefix, 
+                      features = features, 
+                      spots  = spots,
+                      Mean_Reads_per_Spot = reads, 
+                      Mean_Genes_per_Spot = genes)
+    # write data to a sample.csv file
+    write.table(data, file = csv_fname)
+  }
+}
+
+saveInitialStats(sparse_matrix_1,csv_fnames[1],prefixes[1])
+saveInitialStats(sparse_matrix_2,csv_fnames[2],prefixes[2])
+```
+
+## **Visualization of the selected metadata features**
+
+```{r}
+# Function to visualize metadata
+visualize_metadata <- function(sparse_matrix, sample_name, plots_dir,save_data) {
+  plots <- list()
+  
+  # Plot Violin plots for selected features
+  plots$ViolinPlots <- Seurat::VlnPlot(sparse_matrix, 
+                          features = c("nFeature_Spatial","nCount_Spatial","percent.mt","percent.rb",
+                                       "percent.globin", "log10GenesPerUMI"), 
+                          ncol= 6, pt.size = 0.1) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 15))
+  if(save_data){
+    ggplot2::ggsave(filename = "QC_vplot_metadata.png", plot = plots$ViolonPlots,
+                scale = 1, width = 16, height = 9, device = "png", path = plots_dir) & 
+    theme(plot.title = element_text(size=10)) 
+  }
+  # Plot Violin plot for mitochondrial content
+  plots$MitochondrialContent <- Seurat::VlnPlot(sparse_matrix, 
+                             features = c("percent.mt"), 
+                             ncol = 3, pt.size = 0.1)
+  if(save_data){
+  ggplot2::ggsave(filename = "QC_vplot_mt.png", plot = plots$MitochondrialContent,
+                  scale = 1, width = 16, height = 9, device = "png", path = plots_dir)
+  }
+  # Correlation plot: High mitochondrial reads vs low gene content
+  plots$MitochondrialCorrelation <- ggplot2::qplot(x=nFeature_Spatial, y=percent.mt, data=sparse_matrix@meta.data) +
+    ggplot2::labs(caption = "Correlation of Mitochondrial Content with Gene Count") +
+    ggplot2::theme(plot.caption = element_text(hjust = 0.5, size=15, face = "bold"))
+  if(save_data){
+    ggplot2::ggsave(filename = "QC_qplot_mt.png", plot = plots$MitochondrialCorrelation,
+                scale = 1, width = 16, height = 9, device = "png", path = plots_dir)
+  }
+  # Scatter plot: Negative correlation between hemoglobin and ribosomal genes
+  plots$ScatterHemoglobinRibosomal <- Seurat::FeatureScatter(sparse_matrix, 
+                                  feature1 = "percent.globin", 
+                                  feature2 = "percent.rb")
+  if(save_data){
+  ggplot2::ggsave(filename = "QC_scatter_rb_glo.png", plot = plots$ScatterHemoglobinRibosomal,
+                  scale = 1, width = 16, height = 9, device = "png", path = plots_dir)
+
+  }
+  # Scatter plots: Correlation of different metadata features
+  plots$plot1 <- FeatureScatter(sparse_matrix, feature1 = "nCount_Spatial", feature2 = "percent.mt")
+  plots$plot2 <- FeatureScatter(sparse_matrix, feature1 = "nCount_Spatial", feature2 = "nFeature_Spatial")
+  plots$plot3 <- FeatureScatter(sparse_matrix, feature1 = "nCount_Spatial", feature2 = "percent.rb")
+  combined_plot <- grid.arrange(plots$plot1, plots$plot2, plots$plot3)
+
+  if(save_data){
+    ggplot2::ggsave(filename = "QC_scatter_metadata.png", plot = combined_plot, 
+                scale = 1, width = 9, height = 9, device = "png", path = plots_dir)
+  }
+  return(plots)
+}
+
+#Install this "patchwork" package if you have this error:
+#remotes::install_github("thomasp85/patchwork"): Error in Ops.data.frame(guide_loc, panel_loc) : ‘==’ only defined for equally-sized data frames
+```
+
+::: panel-tabset
+### ColonN_1215002B
+
+::: panel-tabset
+```{r,warning=FALSE}
+plots_1 <- visualize_metadata(results_1, prefixes[1],plots_dir = stRNAseq_01_plots_1,save_data)
+```
+
+#### Violin plots
+
+```{r,fig.height=7,fig.width=15}
+print(plots_1$ViolinPlots)
+```
+
+Il y a un plus faible pourcentage de mitochondries et de ribosomes alors que dans les 
+
+#### Correlation of Mitochondrial Content
+
+```{r,warning=FALSE}
+print(plots_1$MitochondrialCorrelation)
+```
+
+#### Scatter plot
+
+```{r}
+print(plots_1$ScatterHemoglobinRibosomal)
+```
+
+#### Vizualisation of metadata features
+
+```{r visualize_2,warning=FALSE,fig.height=7,fig.width=12}
+grid.arrange(plots_1$plot1,plots_1$plot2,plots_1$plot3)
+```
+:::
+
+### CRC_24676A1
+
+::: panel-tabset
+```{r visualize-data_2,warning=FALSE,include=FALSE}
+plots_2 <- visualize_metadata(results_2, prefixes[2],plots_dir = stRNAseq_01_plots_2,save_data)
+```
+
+#### Violin plots
+
+```{r,fig.height=7,fig.width=15}
+print(plots_2$ViolinPlots)
+```
+
+#### Correlation of Mitochondrial Content
+
+```{r,warning=FALSE}
+print(plots_2$MitochondrialCorrelation)
+```
+
+#### Scatter plot
+
+```{r}
+print(plots_2$ScatterHemoglobinRibosomal)
+```
+
+#### Visualisation of metadata features
+
+```{r visualize-2,warning=FALSE,fig.height=7,fig.width=12}
+grid.arrange(plots_2$plot1,plots_2$plot2,plots_2$plot3)
+```
+:::
+:::
+
+## **Spatial Vizualisation**
+
+```{r,warning=FALSE}
+# Function to visualize spatial data with specific titles for each plot
+visualize_spatial_data <- function(sparse_matrix, sample_name,plots_dir,save_data,use_alpha=TRUE) {
+  plots <- list()
+  
+  # Prepare the plot
+  if (use_alpha) {
+    alpha_value = c(0.1, 1)  # Set alpha for contrast
+  } else {
+    alpha_value = NULL  # No alpha applied
+  }
+  
+  # Comprehensive Spatial Feature Plot
+  plots$SpatialFeature <- SpatialFeaturePlot(sparse_matrix, features = c("nCount_Spatial", "nFeature_Spatial", "percent.mt",                          "percent.rb", "percent.globin"),ncol=2,alpha = alpha_value,pt.size.factor = 2.1)
+  
+  if(save_data){
+    ggplot2::ggsave(filename = "SpatialFeaturePlot.png", plot = plots$SpatialFeature, 
+                scale = 1, device = "png", path = plots_dir )
+  }
+
+  # Violin Plot for nCount_Spatial
+  plots$ViolinNCount <- VlnPlot(sparse_matrix, features = "nCount_Spatial", pt.size = 0.1) + NoLegend() +  
+    labs(caption = paste("Violin Plot of nCount_Spatial -", sample_name)) +
+    theme(plot.caption = element_text(hjust = 0.5, size=15, face = "bold"))
+
+  # Spatial Feature Plot for nCount_Spatial
+  plots$SpatialNCount <- SpatialFeaturePlot(sparse_matrix, features = "nCount_Spatial",alpha = alpha_value,pt.size.factor = 2.1) + 
+    labs(caption = paste("Spatial Feature Plot of nCount_Spatial -", sample_name)) +
+    theme(plot.caption = element_text(hjust = 0.5, size=15, face = "bold"))
+  
+  if(save_data){
+  ggplot2::ggsave(filename = "QC.png", plot = plots$SpatialNCount / plots$ViolonNCount, 
+                scale = 1, width = 5, height = 12, device = "png", path = plots_dir)
+}
+  return(plots)
+}
+
+```
+
+::: panel-tabset
+### ColonN_1215002B
+
+::: panel-tabset
+```{r,warning=FALSE}
+plots_1_spatial <- visualize_spatial_data(results_1, prefixes[1],plots_dir = stRNAseq_01_plots_1,save_data)
+```
+
+#### Spatial Features Comprehension
+
+```{r,fig.height=15,fig.width=8}
+print(plots_1_spatial$SpatialFeature)
+```
+
+#### Violon and Spatial plot of nCount_Spatial
+
+```{r,fig.width=10,fig.height=12}
+print(plots_1_spatial$SpatialNCount/plots_1_spatial$ViolinNCount)
+```
+:::
+
+### CRC_24676A1
+
+::: panel-tabset
+```{r visualize_spatial-ColonN_1215002B,warning=FALSE}
+plots_2_spatial <- visualize_spatial_data(results_2, prefixes[2],plots_dir = stRNAseq_01_plots_2,save_data)
+
+```
+
+#### Spatial Features Comprehension
+
+```{r,fig.height=15,fig.width=8}
+print(plots_2_spatial$SpatialFeature)
+```
+
+#### Violon and Spatial plot of nCount_Spatial
+
+```{r,fig.width=10,fig.height=12}
+print(plots_2_spatial$SpatialNCount/plots_2_spatial$ViolinNCount)
+```
+:::
+:::
+
+## **Filtering**
+
+```{r filtering visualization,warning=FALSE}
+# Function to filter and visualize data with specific titles for each plot
+filter_and_visualize_data <- function(sparse_matrix, sample_name,plots_dir,save_data,use_alpha=TRUE) {
+  results <- list()
+  # Filtering the data based on mitochondrial content and feature count
+  results$QC_data <- subset(sparse_matrix, subset = nFeature_Spatial > 50 &
+                    nFeature_Spatial < 8000 & percent.mt < 5)
+  
+  # Prepare the plot
+  if (use_alpha) {
+    alpha_value = c(0.1, 1)  # Set alpha for contrast
+  } else {
+    alpha_value = NULL  # No alpha applied
+  }
+  # Visualization of filtering results
+  results$plot <- SpatialFeaturePlot(results$QC_data, features = c("nCount_Spatial", "nFeature_Spatial", "percent.mt",
+                                                   "percent.rb", "percent.globin"),ncol=2,alpha = alpha_value,pt.size.factor = 2.1) + labs(caption = paste("Filtering Visualization-", sample_name)) +
+  theme(
+    plot.caption = element_text(hjust = 0.5, size = 15,face = "bold")
+  )
+   # filtered cells or spots are in purple
+  if(save_data){
+  ggplot2::ggsave(filename = "Spot_filtering.png", plot = results$plot, 
+                scale = 1, width = 9, height = 9, device = "png", path = plots_dir)
+  }
+  return(results)
+}
+
+data_filtered_1 <-filter_and_visualize_data(results_1, prefixes[1],plots_dir= stRNAseq_01_plots_1,save_data)
+data_filtered_2 <- filter_and_visualize_data(results_2, prefixes[2],stRNAseq_01_plots_2,save_data)
+
+QC_data_1 <- data_filtered_1$QC_data
+QC_data_2 <- data_filtered_2$QC_data
+```
+
+::: panel-tabset
+### ColonN_1215002B
+
+```{r filter-visualize-data1,warning=FALSE,fig.height=15,fig.width=8}
+print(data_filtered_1$plot)
+```
+
+### CRC_24676A1
+
+```{r filter-visualize-CRC_data2,warning=FALSE,fig.height=15,fig.width=8}
+print(data_filtered_2$plot)
+```
+:::
+
+Save the reslults
+
+```{r Final statistics of the dataset}
+saveFilteredStats <- function(sparse_matrix,prefix,csv_fname){
+  # number of spots per sample
+  spots <- ncol(x = sparse_matrix)
+  
+  # number of genes
+  features <- nrow(x = sparse_matrix)
+  
+  # median genes per spot
+  genes <- median(sparse_matrix$nFeature_Spatial)
+  
+  # median reads per spot -> median of nCount_Spatial
+  reads <- median(sparse_matrix$nCount_Spatial)
+  
+  # save the initial statistics in a csv file
+  time <- "Filtered"
+  row <- data.frame(time, prefix, features, spots, reads, genes)
+    write.table(row, file = csv_fname, sep = " ",
+                  append = TRUE, quote = FALSE,
+                  col.names = FALSE, row.names = FALSE)}
+
+saveFilteredStats(sparse_matrix_1,prefixes[1],csv_fnames[1])
+saveFilteredStats(sparse_matrix_2,prefixes[2],csv_fnames[2])
+```
+
+```{r,echo=FALSE}
+
+# Define a function to save Seurat objects and logs conditionally based on a save_data flag.
+save_data_and_logs <- function(sparse_matrix, QC_data, out_dir, prefix, save_data) {
+  # Only proceed with saving if the save_data argument is TRUE.
+  if (save_data) {
+    # Create directories for RDS and log files if they don't already exist.
+    # The directories are named based on the provided prefix and include a subdirectory for QC.
+    dir.create(file.path(out_dir, "rds_data/01_QC/"), recursive = TRUE)
+    dir.create(file.path(out_dir, "log/01_QC/"), recursive = TRUE)
+
+    # Save the sparse matrix and QC data as RDS files in the respective directories.
+    # RDS is a file format for serializing and saving R objects.
+    saveRDS(sparse_matrix, file=file.path(out_dir, "rds_data/01_QC/", paste0(prefix, "_sparse_matrix.rds")))
+    saveRDS(QC_data, file=file.path(out_dir, "rds_data/01_QC/", paste0(prefix, "_QC_matrix.rds")))
+ 
+    # Load the logr library to enable logging and open a log file specific to the dataset.
+    library(logr)
+    log_file <- file.path(out_dir, "log/01_QC/", paste0(prefix, "_stRNAseq_01_QC_Filter.log"))
+    log_open(log_file,logdir = F)
+    
+    ### Uncomment if needed ###
+    
+    # Print the details of the sparse matrix to the log file.
+    #log_print("Sparse matrix:")
+    #put(sparse_matrix, blank_after = TRUE)
+ 
+    # Print the details of the QC-processed data to the log file.
+    #log_print("New matrix after QC:")
+    #put(QC_data, blank_after = TRUE)
+ 
+    # Close the log file after writing all the details.
+    log_close()
+  }
+}
+
+save_data_and_logs(sparse_matrix_1, QC_data_1,out_dirs[1],prefixes[1],save_data)
+save_data_and_logs(sparse_matrix_2,QC_data_2,out_dirs[2],prefixes[2],save_data)
+```

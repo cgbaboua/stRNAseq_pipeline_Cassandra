@@ -1,0 +1,664 @@
+---
+title: "03_Dim_Reduction"
+author : Cassandra Gbaboua
+format: html
+editor: visual
+---
+
+# **DIMENSIONALITY REDUCTION**
+
+<!--  Setting up global markdown environment -->
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE)
+```
+
+<!--  Cleaning r environment -->
+
+```{r, include=FALSE}
+#rm(list=ls())
+```
+
+<!-- Loading useful libraries --->
+
+Loading useful libraries
+
+```{r}
+suppressPackageStartupMessages({
+  #To install Matrix >1.65 : install.packages("Matrix", repos = "http://R-Forge.R-project.org")and restart session
+  library(Seurat)
+  library(ggplot2)
+  library(tibble)
+  library(dplyr)
+})
+
+set.seed(333)
+```
+
+Set directories and variables
+
+```{r,warning=FALSE}
+# *** MODIFY HERE ****
+# Set the directories and variables for the correct execution of the code
+
+# General directory
+directory <- '~/Projet_Long/Projet_Long_stRNAsq/'
+setwd(directory)
+
+# Set the name of the sample as a prefix (listing all dataset directories under MyData)
+sample_dirs <- list.files(data_dir, full.names = TRUE)
+prefixes <- basename(sample_dirs)  # Assuming directory names are the prefixes (ex : ColonN_1215002B)
+
+# Data directories for RDS data based on sample prefixes
+data_dirs <- sapply(prefixes, function(x) paste0(directory, "ST_outfiles/", x, "/rds_data/02_SCT/"))
+
+# Output directories based on sample prefixes
+out_dirs <- sapply(prefixes, function(x) paste0(directory, "ST_outfiles/", x, "/"))
+
+# Save directories for plots based on sample prefixes
+save_dirs <- sapply(prefixes, function(x) paste0(directory, 'plots/03_DR/'))
+
+# File names for the SCT matrices based on sample prefixes
+files <- sapply(prefixes, function(x) paste0(x, "_SCT_matrix.rds"))
+
+# True if you want to save plots and files
+save_data <- TRUE
+
+```
+
+::: info
+Loading the data
+:::
+
+```{r Open the seurat object,warning=FALSE}
+# Load SCT matrix for ColonN_1215002B
+SCT_matrix_1 <- readRDS(paste0(data_dirs[1], files[1]))
+# dir where to save images
+stRNAseq_04_plots_1 <- paste0(save_dirs[1], prefixes[1])
+dir.create(stRNAseq_04_plots_1, recursive=TRUE)
+
+# Load SCT matrix for CRC_24676A1
+SCT_matrix_2 <- readRDS(paste0(data_dirs[2], files[2]))
+# dir where to save images
+stRNAseq_04_plots_2 <- paste0(save_dirs[2], prefixes[2])
+dir.create(stRNAseq_04_plots_2, recursive=TRUE)
+```
+
+## **Run PCA**
+
+::: panel-tabset
+### **ColonN_1215002B**
+
+```{r}
+# Run PCA for ColonN_1215002B
+PCA_data_1 <- RunPCA(SCT_matrix_1, npcs = 50, features = VariableFeatures(object = SCT_matrix_1), verbose = FALSE)
+
+# Examine and visualize PCA results for ColonN_1215002B
+print(PCA_data_1[["pca"]], dims = 1:5, nfeatures = 5)
+```
+
+### **CRC_24676A1**
+
+```{r}
+# Run PCA for CRC_24676A1
+PCA_data_2 <- RunPCA(SCT_matrix_2, npcs = 50, features = VariableFeatures(object = SCT_matrix_2), verbose = FALSE)
+
+# Examine and visualize PCA results for CRC_24676A1
+print(PCA_data_2[["pca"]], dims = 1:5, nfeatures = 5)
+```
+:::
+
+::: info
+Save PCA data
+:::
+
+```{r saving PCA dim red}
+savePCAData <- function(PCA_data, csv_dir,save_data){
+    if(save_data){
+      # Directory creation is ensured
+      csv_dir <- csv_dir
+      # Saving 'components.csv'
+      mat <- Seurat::GetAssayData(PCA_data, assay = "SCT", slot = "scale.data")
+      data_to_write_out <- as.data.frame(as.matrix(mat)) %>% dplyr::mutate(gene_id = rownames(mat))
+      write.csv(x = data_to_write_out, file = file.path(csv_dir, "components.csv"), quote = FALSE, row.names = FALSE)
+    
+      # Saving 'projection.csv'
+      mat <- Embeddings(PCA_data, reduction = "pca")
+      data_to_write_out <- as.data.frame(as.matrix(mat)) %>% dplyr::mutate(Barcode = rownames(mat))
+      write.csv(x = data_to_write_out, file = file.path(csv_dir, "projection.csv"), quote = FALSE, row.names = FALSE)
+    
+      # Saving 'features_selected.csv'
+      features <- PCA_data@assays$Spatial@var.features
+      data_to_write_out <- as.data.frame(as.matrix(features)) %>% dplyr::mutate(Feature = rownames(features))
+      data_to_write_out$Feature <- paste(data_to_write_out$Feature, data_to_write_out$V1, sep=",")
+      extra <- as.data.frame(as.matrix(data_to_write_out$Feature)) %>% setNames(c("Feature"))
+      write.csv(extra, file.path(csv_dir, "features_selected.csv"), quote = FALSE, row.names = FALSE)
+    
+      # Saving 'variance.csv'
+      mat <- Seurat::GetAssayData(PCA_data, assay = "SCT", slot = "scale.data")
+      pca <- PCA_data[["pca"]]
+      total_variance <- sum(matrixStats::rowVars(mat))
+      eigValues = (pca@stdev)^2  ## EigenValues
+      varExplained = eigValues / total_variance
+      dt <- data.table::as.data.table(varExplained, .keep.rownames = "PC") %>% dplyr::mutate(PC = rownames(.))
+      write.csv(dt, file.path(csv_dir, "variance.csv"), quote = FALSE, row.names = FALSE)
+    
+      # Saving 'dispersion.csv'
+      write.csv(dt, file.path(csv_dir, "dispersion.csv"), quote = FALSE, row.names = FALSE)
+    }
+  }
+# Example usage:
+savePCAData(PCA_data_1, stRNAseq_04_plots_1, save_data)
+savePCAData(PCA_data_2,stRNAseq_04_plots_2, save_data)
+
+```
+
+## **Visualization of the PCA**
+
+::: panel-tabset
+### **ColonN_1215002B**
+
+::: panel-tabset
+#### First
+
+```{r}
+SpatialFeaturePlot(SCT_matrix_1, features = c("ANXA3", "PIK3CA","MMP2"),alpha=c(0.1,1),pt.size.factor = 2.1)
+```
+
+#### Second
+
+```{r}
+SpatialFeaturePlot(SCT_matrix_1, features = c("CD74","MST1","CD63"),alpha=c(0.1,1),pt.size.factor = 2.1)
+```
+
+#### Three
+
+```{r}
+SpatialFeaturePlot(SCT_matrix_1, features = c("NRAS", "BRAF","CXCL8"),alpha=c(0.1,1),pt.size.factor = 2.1)
+```
+
+#### Four
+
+```{r}
+SpatialFeaturePlot(SCT_matrix_1, features = c("KRAS", "EGFR","SPINK1"),alpha=c(0.1,1),pt.size.factor = 2.1)
+```
+
+#### Five
+
+```{r}
+SpatialFeaturePlot(SCT_matrix_1, features = c("TFF3","SPINK4"),alpha=c(0.1,1),pt.size.factor = 2.1)
+```
+:::
+
+### **CRC_24676A1**
+
+::: panel-tabset
+#### First
+
+```{r}
+SpatialFeaturePlot(SCT_matrix_2, features = c("ANXA3", "PIK3CA","MMP2"),alpha=c(0.1,1),pt.size.factor = 2.1)
+```
+
+#### Second
+
+```{r}
+SpatialFeaturePlot(SCT_matrix_2, features = c("CD74","MST1","CD63"),alpha=c(0.1,1),pt.size.factor = 2.1)
+```
+
+#### Three
+
+```{r}
+SpatialFeaturePlot(SCT_matrix_2, features = c("NRAS", "BRAF","CXCL8"),alpha=c(0.1,1),pt.size.factor = 2.1)
+```
+
+#### Four
+
+```{r}
+SpatialFeaturePlot(SCT_matrix_2, features = c("KRAS", "EGFR","SPINK1"),alpha=c(0.1,1),pt.size.factor = 2.1)
+```
+
+#### Five
+
+```{r}
+SpatialFeaturePlot(SCT_matrix_2, features = c("TFF3","SPINK4"),alpha=c(0.1,1),pt.size.factor = 2.1)
+```
+:::
+:::
+
+## **Dimensional plots of PCA**
+
+::: panel-tabset
+### **ColonN_1215002B**
+
+::: panel-tabset
+#### Dim & Spatial Dim plot
+
+```{r,warning=FALSE,fig.width=12}
+# Visualization of the PCA for ColonN_1215002B
+p1_1 <- DimPlot(PCA_data_1, reduction = "pca", label = TRUE)
+p2_1 <- SpatialDimPlot(PCA_data_1, label = TRUE, label.size = 3)
+
+if(save_data){
+  ggplot2::ggsave(filename = "DimPlot_PCA.png", plot = p1_1 + p2_1, 
+                scale = 1, width = 20, height = 9, device = "png", path = stRNAseq_04_plots_1)
+
+}
+print(p1_1 + p2_1)
+```
+
+#### Dim Loadings
+
+```{r,fig.height=15, fig.width=10}
+plot1_1 <- VizDimLoadings(PCA_data_1, dims = 1:5, reduction = "pca")
+
+if(save_data){
+  ggplot2::ggsave(filename = "DimLoad_PCA.png", plot = plot1_1, 
+                scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_04_plots_1)
+}
+
+print(plot1_1)
+```
+
+#### Feature plot
+
+```{r,fig.height=10,fig.width=12}
+plot2_1 <- FeaturePlot(PCA_data_1, features=c("KRAS", "BRAF", "CD74","CD63","ANXA3","PIK3CA","MMP2","NRAS","CXCL8","EGFR","SPINK1","SPINK4","TFF3"), cols = c('lightgrey', 'red'))
+
+if(save_data){
+  ggplot2::ggsave(filename = "HighLoading_PCA.png", plot = plot2_1, 
+                scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_04_plots_1)
+}
+
+print(plot2_1)
+```
+
+#### Elbow plot
+
+```{r,echo=FALSE}
+plot3_1 <- ElbowPlot(PCA_data_1, ndim = ncol(Embeddings(PCA_data_1, "pca")))
+
+if(save_data){
+  ggplot2::ggsave(filename = "ElbowPlot_PCA.png", plot = plot3_1, 
+                scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_04_plots_1)
+}
+
+print(plot3_1)
+```
+:::
+
+### **CRC_24676A1**
+
+::: panel-tabset
+#### Dim & Spatial Dim plot
+
+```{r,warning=FALSE,fig.width=12}
+# Visualization of the PCA for ColonN_1215002B
+p1_2 <- DimPlot(PCA_data_2, reduction = "pca", label = TRUE)
+p2_2 <- SpatialDimPlot(PCA_data_2, label = TRUE, label.size = 3)
+
+if(save_data){
+  ggplot2::ggsave(filename = "DimPlot_PCA.png", plot = p1_2 + p2_2, 
+                scale = 1, width = 20, height = 9, device = "png", path = stRNAseq_04_plots_2)
+}
+
+print(p1_2 + p2_2)
+```
+
+#### Dim Loadings
+
+```{r,fig.height=15, fig.width=10}
+plot1_2 <- VizDimLoadings(PCA_data_2, dims = 1:5, reduction = "pca")
+
+if(save_data){
+  ggplot2::ggsave(filename = "DimLoad_PCA.png", plot = plot1_2, 
+                scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_04_plots_2)
+}
+
+print(plot1_2)
+```
+
+#### Feature plot
+
+```{r,fig.height=10,fig.width=12}
+plot2_2 <- FeaturePlot(PCA_data_2, features=c("KRAS", "BRAF", "CD74","CD63","ANXA3","PIK3CA","MMP2","NRAS","CXCL8","EGFR","SPINK1","SPINK4","TFF3"), cols = c('lightgrey', 'red'))
+
+if(save_data){
+  ggplot2::ggsave(filename = "HighLoading_PCA.png", plot = plot2_2, 
+                scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_04_plots_2)
+}
+
+print(plot2_2)
+```
+
+#### Elbow plot
+
+```{r,echo=FALSE}
+plot3_2 <- ElbowPlot(PCA_data_2, ndim = ncol(Embeddings(PCA_data_2, "pca")))
+
+if(save_data){
+  ggplot2::ggsave(filename = "ElbowPlot_PCA.png", plot = plot3_2, 
+                scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_04_plots_2)
+}
+
+print(plot3_2)
+```
+:::
+:::
+
+```{r non-linear dim red}
+# Non-linear dimensionality reduction for ColonN_1215002B
+PCA_data_1 <- FindNeighbors(PCA_data_1, dims = 1:20, verbose = FALSE)
+PCA_data_1 <- FindClusters(PCA_data_1, resolution = 0.5, verbose = FALSE)
+
+TSNE_data_1 <- RunTSNE(PCA_data_1, dims = 1:20)
+UMAP_data_1 <- RunUMAP(PCA_data_1, dims = 1:20)
+
+# Non-linear dimensionality reduction for CRC_24676A1
+PCA_data_2 <- FindNeighbors(PCA_data_2, dims = 1:20, verbose = FALSE)
+PCA_data_2 <- FindClusters(PCA_data_2, resolution = 0.5, verbose = FALSE)
+
+TSNE_data_2 <- RunTSNE(PCA_data_2, dims = 1:20)
+UMAP_data_2 <- RunUMAP(PCA_data_2, dims = 1:20)
+
+```
+
+::: info
+Save the Dim Reduction data
+:::
+
+```{r}
+saveDimRedData <- function(TSNE_data, UMAP_data, csv_dir,save_data) {
+  if(save_data){
+    # Directory creation is ensured
+    csv_dir <- csv_dir
+    # Process and save t-SNE projection data
+    mat <- Embeddings(TSNE_data, reduction = "tsne")
+    data_to_write_out <- as.data.frame(as.matrix(mat)) %>% dplyr::mutate(Barcode = rownames(mat))
+    write.csv(x = data_to_write_out, file = file.path(csv_dir, "tsne_projection.csv"),
+              quote = FALSE, row.names = FALSE)
+  
+    # Process and save UMAP projection data
+    mat <- Embeddings(UMAP_data, reduction = "umap")
+    data_to_write_out <- as.data.frame(as.matrix(mat)) %>% dplyr::mutate(Barcode = rownames(mat))
+    write.csv(x = data_to_write_out, file = file.path(csv_dir, "UMAP_projection.csv"),
+              quote = FALSE, row.names = FALSE)
+    }
+}
+
+# Example usage of the function
+saveDimRedData(TSNE_data_1, UMAP_data_1, stRNAseq_04_plots_1,save_data)
+saveDimRedData(TSNE_data_2, UMAP_data_2, stRNAseq_04_plots_2,save_data)
+```
+
+## **Visualization of Non-Linear Dimension Reduction**
+
+::: panel-tabset
+### **ColonN_1215002B**
+
+::: panel-tabset
+#### t-SNE and UMAP Plots
+
+```{r,warning=FALSE,fig.width=12,fig.height=7}
+plot8_1 <- TSNEPlot(TSNE_data_1)
+plot9_1 <- UMAPPlot(UMAP_data_1)
+
+if(save_data){
+  ggplot2::ggsave(filename = "TSNEPlot.png", plot = plot8_1, 
+                scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_04_plots_1)
+ggplot2::ggsave(filename = "UMAPPlot.png", plot = plot9_1, 
+                scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_04_plots_1)
+ggplot2::ggsave(filename = "TSNEPlot_vs_UMAPPlot.png", plot = plot8_1 + plot9_1, 
+                scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_04_plots_1)
+
+}
+
+print(plot8_1 + plot9_1)
+```
+
+#### t-SNE Plot
+
+```{r,warning=FALSE,fig.width=10}
+p1_1_tsne <- DimPlot(TSNE_data_1, reduction = "tsne", label = TRUE)
+p2_1_tsne <- SpatialDimPlot(TSNE_data_1, label.size = 3,pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(filename = "TSNE_Plot.png", plot = p1_1_tsne + p2_1_tsne, 
+                scale = 1, width = 20, height = 9, device = "png", path = stRNAseq_04_plots_1)
+}
+
+print(p1_1_tsne + p2_1_tsne)
+```
+
+#### UMAP Plot
+
+```{r,warning=FALSE,fig.width=10}
+p1_1_umap <- DimPlot(UMAP_data_1, reduction = "umap", label = TRUE)
+p2_1_umap <- SpatialDimPlot(UMAP_data_1, label.size = 3,pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(filename = "UMAPPlot.png", plot = p1_1_umap+p2_1_umap, 
+                  scale = 1, width = 20, height = 9, device = "png", path = stRNAseq_04_plots_1)
+}
+
+print(p1_1_umap + p2_1_umap)
+```
+
+#### Spatial Clusters for t-SNE
+
+```{r,warning=FALSE,fig.width=12,fig.height=12}
+tsne_clusters_1 <- SpatialDimPlot(TSNE_data_1, cells.highlight = CellsByIdentities(TSNE_data_1), facet.highlight = TRUE, ncol = 3,pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(filename = "tSNE_Spatial_clusters.png", plot = tsne_clusters_1, 
+                scale = 1, width = 20, height = 20, device = "png", path = stRNAseq_04_plots_1)
+}
+
+print(tsne_clusters_1)
+```
+
+#### Spatial Clusters for UMAP
+
+```{r,warning=FALSE,fig.width=12,fig.height=12}
+umap_clusters_1 <- SpatialDimPlot(UMAP_data_1, cells.highlight = CellsByIdentities(UMAP_data_1), facet.highlight = TRUE, ncol = 3,pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(filename = "UMAP_Spatial_clusters.png", plot = umap_clusters_1, 
+                scale = 1, width = 20, height = 20, device = "png", path = stRNAseq_04_plots_1)
+}
+
+print(umap_clusters_1)
+
+```
+
+#### Cell Cycle Phase 1
+
+```{r,warning=FALSE,fig.width=10}
+tSNE_1 <- DimPlot(TSNE_data_1, reduction = "tsne", group.by = "Phase", shuffle = TRUE) + ggtitle("t-SNE by Phase for ColonN_1215002B")
+tsne_phase_1 <- SpatialDimPlot(TSNE_data_1, group.by = "Phase", facet.highlight = TRUE,pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(plot = tSNE_1, filename = "tSNE_per_Phase.png",
+       path = stRNAseq_04_plots_1, scale = 1, width = 9, height = 9, device = "png")
+  ggplot2::ggsave(filename = "tSNE_phase_clusters.png", plot = tsne_phase_1, 
+                scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_04_plots_1)
+
+}
+
+print(tSNE_1 + tsne_phase_1)
+```
+
+#### Cell Cycle Phase 2
+
+```{r,warning=FALSE,fig.width=10}
+UMAP_1 <- DimPlot(UMAP_data_1, reduction = "umap", group.by = "Phase", shuffle = TRUE) + ggtitle("UMAP by Phase for ColonN_1215002B")
+umap_phase_1 <- SpatialDimPlot(UMAP_data_1, group.by = "Phase", facet.highlight = TRUE,pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(plot = UMAP_1, filename = "UMAP_per_Phase.png",
+       path = stRNAseq_04_plots_1, scale = 1, width = 9, height = 9, device = "png")
+  ggplot2::ggsave(filename = "UMAP_phase_clusters.png", plot = umap_phase_1, 
+                scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_04_plots_1)
+}
+
+print(UMAP_1 + umap_phase_1)
+```
+:::
+
+### **CRC_24676A1**
+
+::: panel-tabset
+#### t-SNE and UMAP Plots
+
+```{r,warning=FALSE,fig.width=12,fig.height=7}
+plot8_2 <- TSNEPlot(TSNE_data_2)
+plot9_2 <- UMAPPlot(UMAP_data_2)
+
+if(save_data){
+  ggplot2::ggsave(filename = "TSNEPlot.png", plot = plot8_2, 
+                  scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_04_plots_2)
+  ggplot2::ggsave(filename = "UMAPPlot.png", plot = plot9_2, 
+                  scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_04_plots_2)
+  ggplot2::ggsave(filename = "TSNEPlot_vs_UMAPPlot.png", plot = plot8_2 + plot9_2, 
+                  scale = 1, width = 16, height = 9, device = "png", path = stRNAseq_04_plots_2)
+  
+}
+
+print(plot8_2 + plot9_2)
+
+```
+
+#### t-SNE Plot
+
+```{r,warning=FALSE,fig.width=10}
+p1_2_tsne <- DimPlot(TSNE_data_2, reduction = "tsne", label = TRUE)
+p2_2_tsne <- SpatialDimPlot(TSNE_data_2, label.size = 3,pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(filename = "TSNE_Plot.png", plot = p1_2_tsne + p2_2_tsne, 
+                  scale = 1, width = 20, height = 9, device = "png", path = stRNAseq_04_plots_2)
+}
+
+print(p1_2_tsne + p2_2_tsne)
+
+```
+
+#### UMAP Plot
+
+```{r,warning=FALSE,fig.width=10}
+p1_2_umap <- DimPlot(UMAP_data_2, reduction = "umap", label = TRUE)
+p2_2_umap <- SpatialDimPlot(UMAP_data_2, label.size = 3,pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(filename = "UMAPPlot.png", plot = p1_2_umap+p2_2_umap, 
+                  scale = 1, width = 20, height = 9, device = "png", path = stRNAseq_04_plots_2)
+}
+
+print(p1_2_umap + p2_2_umap)
+
+```
+
+#### Spatial Clusters for t-SNE
+
+```{r,warning=FALSE,fig.height=10,fig.width=10}
+tsne_clusters_2 <- SpatialDimPlot(TSNE_data_2, cells.highlight = CellsByIdentities(TSNE_data_2), facet.highlight = TRUE, ncol =3,pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(filename = "tSNE_Spatial_clusters.png", plot = tsne_clusters_2, 
+                  scale = 1, width = 20, height = 20, device = "png", path = stRNAseq_04_plots_2)
+}
+
+print(tsne_clusters_2)
+```
+
+#### Spatial Clusters for UMAP
+
+```{r,warning=FALSE,fig.height=10,fig.width=10}
+umap_clusters_2 <- SpatialDimPlot(UMAP_data_2, cells.highlight = CellsByIdentities(UMAP_data_2), facet.highlight = TRUE, ncol = 3,pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(filename = "UMAP_Spatial_clusters.png", plot = umap_clusters_2, 
+                  scale = 1, width = 20, height = 20, device = "png", path = stRNAseq_04_plots_2)
+}
+
+print(umap_clusters_2)
+
+```
+
+#### Cell Cycle Phase 1
+
+```{r,warning=FALSE,fig.width=10}
+tSNE_2 <- DimPlot(TSNE_data_2, reduction = "tsne", group.by = "Phase", shuffle = TRUE) + ggtitle("t-SNE by Phase for CRC_24676A1")
+tsne_phase_2 <- SpatialDimPlot(TSNE_data_2, group.by = "Phase", facet.highlight = TRUE,pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(plot = tSNE_2, filename = "tSNE_per_Phase.png",
+                  path = stRNAseq_04_plots_2, scale = 1, width = 9, height = 9, device = "png")
+  ggplot2::ggsave(filename = "tSNE_phase_clusters.png", plot = tsne_phase_2, 
+                  scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_04_plots_2)
+  
+}
+
+print(tSNE_2 + tsne_phase_2)
+```
+
+#### Cell Cycle Phase 2
+
+```{r,warning=FALSE,fig.width=10}
+
+UMAP_2 <- DimPlot(UMAP_data_2, reduction = "umap", group.by = "Phase", shuffle = TRUE) + ggtitle("UMAP by Phase for CRC_24676A1")
+umap_phase_2 <- SpatialDimPlot(UMAP_data_2, group.by = "Phase", facet.highlight = TRUE, pt.size.factor = 2.1)
+
+if(save_data){
+  ggplot2::ggsave(plot = UMAP_2, filename = "UMAP_per_Phase.png",
+                  path = stRNAseq_04_plots_2, scale = 1, width = 9, height = 9, device = "png")
+  ggplot2::ggsave(filename = "UMAP_phase_clusters.png", plot = umap_phase_2, 
+                  scale = 1, width = 9, height = 9, device = "png", path = stRNAseq_04_plots_2)
+}
+
+print(UMAP_2 + umap_phase_2)
+```
+:::
+:::
+
+::: info
+Save the results
+:::
+
+```{r}
+saveDimensionReductionResults <- function(PCA_data, TSNE_data, UMAP_data, out_dir, prefix,save_data) {
+  if(save_data){
+    # Create necessary directories if they do not exist
+    dir.create(file.path(out_dir, "rds_data/03_DR/"), recursive = TRUE)
+    dir.create(file.path(out_dir, "log/03_DR/"), recursive = TRUE)
+
+    # Save RDS files for PCA, tSNE, and UMAP data
+    saveRDS(PCA_data, file = file.path(out_dir, "rds_data/03_DR/", paste0(prefix, "_PCA_matrix.rds")))
+    saveRDS(TSNE_data, file = file.path(out_dir, "rds_data/03_DR/", paste0(prefix, "_tSNE_matrix.rds")))
+    saveRDS(UMAP_data, file = file.path(out_dir, "rds_data/03_DR/", paste0(prefix, "_UMAP_matrix.rds")))
+
+    # Initialize logging
+    library(logr)
+    log_file_path <- file.path(out_dir, "log/03_DR/", paste0(prefix, "_stRNAseq_03_DimR.log"))
+    log_open(log_file_path,logdir = F)
+
+    # Log PCA matrix details
+    #log_print("New matrix after PCA: ")
+    #put(PCA_data, blank_after = TRUE)
+
+    # Log t-SNE matrix details
+    #log_print("Matrix after TSNE: ")
+    #put(TSNE_data, blank_after = TRUE)
+
+    # Log UMAP matrix details
+    #log_print("Matrix after UMAP: ")
+    #put(UMAP_data, blank_after = TRUE)
+
+    # Close the log file
+    log_close()
+  }
+}
+# Example usage of the function
+saveDimensionReductionResults(PCA_data_1,TSNE_data_1, UMAP_data_1, out_dirs[1], prefixes[1],save_data)
+saveDimensionReductionResults(PCA_data_2,TSNE_data_2,UMAP_data_2,out_dirs[2], prefixes[2],save_data)
+
+```

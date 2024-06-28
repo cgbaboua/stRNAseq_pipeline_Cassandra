@@ -1,0 +1,515 @@
+---
+title: "05_Annot_test"
+author : Cassandra Gbaboua
+format: html
+editor: visual
+---
+
+# **CELL ANNOTATION WITH SEURAT**
+
+<!--  Setting up global markdown environment -->
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE)
+```
+
+<!-- Loading useful libraries --->
+
+Loading libraries
+
+```{r}
+suppressPackageStartupMessages({
+  #To install Matrix >1.65 : install.packages("Matrix", repos = "http://R-Forge.R-project.org") and restart session
+  library(Seurat)
+  library(ggplot2)
+  library(dplyr)
+  library(cowplot)
+  library(clustree)
+})
+
+set.seed(333)
+```
+
+Set Directories and variables
+
+```{r}
+# *** MODIFY HERE ****
+# Set the directories and variables for the correct execution of the code
+
+# General directory
+directory <- '~/Projet_Long/Projet_Long_stRNAsq/'
+setwd(directory)
+
+# Data directory
+data_dir <- paste0(directory, 'Data/MyData/')
+
+# Set the name of the sample as a prefix (listing all dataset directories under MyData)
+sample_dirs <- list.files(data_dir, full.names = TRUE)
+prefixes <- basename(sample_dirs)  # Assuming directory names are the prefixes (ex : ColonN_1215002B)
+
+# Data directory
+data_dirs <- sapply(prefixes,function(x) paste0(directory,'ST_outfiles/', x,"/rds_data/03_DR/"))
+# or 'rds_data/03_1_DR/' if working with merged samples
+
+# Dir where to save images
+save_dir <- paste0(directory, 'plots/AA_seurat/')
+
+# Output directory
+out_dirs <- sapply(prefixes, function(x) paste0(directory, "ST_outfiles/",x,"/"))
+invisible(sapply(out_dirs, dir.create, recursive = TRUE))
+
+# Name of the file to analyse
+file_1 <- paste0(prefixes[1],"_UMAP_matrix.rds")
+file_2 <- paste0(prefixes[2],"_UMAP_matrix.rds")
+
+# reference data for annotation
+FILE="~/Projet_Long/Projet_Long_stRNAsq/Data/Reference_Data/CRC_Ref/CRC_GSE166555_Expression/ref_object.rds"
+allen_reference <- readRDS(FILE)
+
+#If your reference data is a .h5 file you have to transform it in Seurat object with Read10X_h5 
+
+
+```
+
+Add annotation data via metadata
+
+```{r}
+metadata <- read.csv(file = "~/Projet_Long/Projet_Long_stRNAsq/Data/Reference_Data/CRC_Ref/CRC_GSE166555_Expression/CRC_GSE166555_CellMetainfo_table.tsv",sep = "\t")
+
+# # View first lines 
+#head(metadata)
+```
+
+```{r}
+# Let's verify that the order of cells in 'metadata' matches the order in 'seurat_object'.
+metadata <- metadata[match(colnames(allen_reference), metadata$Cell), ]
+```
+
+```{r}
+# Add each metadata column to the Seurat object.
+# Repeat this process for each metadata column you wish to add.
+
+seurat_object <- allen_reference
+seurat_object <- AddMetaData(seurat_object, metadata = metadata$Celltype..malignancy., col.name = "malignancy")
+seurat_object <- AddMetaData(seurat_object, metadata = metadata$Celltype..major.lineage., col.name = "major_lineage")
+seurat_object <- AddMetaData(seurat_object, metadata = metadata$Celltype..minor.lineage., col.name = "minor_lineage")
+
+#Add all metadata 
+seurat_object <- AddMetaData(seurat_object,metadata= metadata)
+# #Check metadata
+#head(seurat_object@meta.data)
+
+```
+
+Loading the data
+
+```{r Loading the data}
+# The Seurat Object is opened twice so that one is used for the prediction and the other to save the final result
+UMAP_data_1 <- readRDS(paste0(data_dirs[1],file_1))
+final_matrix_1 <- readRDS(paste0(data_dirs[1], file_1))
+
+# dir where to save images
+stRNAseq_07_plots_1 <- paste0(save_dir, prefixes[1])
+dir.create(stRNAseq_07_plots_1, recursive=TRUE)
+```
+
+```{r}
+# The Seurat Object is opened twice so that one is used for the prediction and the other to save the final result
+UMAP_data_2 <- readRDS(paste0(data_dirs[2],file_2))
+final_matrix_2 <- readRDS(paste0(data_dirs[2], file_2))
+
+# dir where to save images
+stRNAseq_07_plots_2 <- paste0(save_dir, prefixes[2])
+dir.create(stRNAseq_07_plots_2, recursive=TRUE)
+```
+
+Pre-process the reference Seurat Object
+
+```{r}
+#Normalize data 
+# seurat_object <- NormalizeData(seurat_object, features = VariableFeatures(object = seurat_object))
+# # Scale data
+# seurat_object <- ScaleData(seurat_object, features = VariableFeatures(object = seurat_object))
+# #Finding variable features for layer counts
+# seurat_object <- FindVariableFeatures(object = seurat_object)
+# # Run PCA
+# seurat_object <- RunPCA(seurat_object, features = VariableFeatures(object = seurat_object),)
+# # Transform SCT
+# seurat_object <- SCTransform(seurat_object,variable.features.n = 3000)
+
+# #Save the object
+#saveRDS(seurat_object,file='~/Projet_Long/Projet_Long_stRNAsq/Data/Reference_Data/CRC_Ref/CRC_GSE166555_Expression/CRC_GSE166555_Seurat_SCT_matrix.rds')
+```
+
+Load the Seurat object if he's already pre-processed
+
+```{r}
+seurat_object <- readRDS(file ='~/Projet_Long/Projet_Long_stRNAsq/Data/Reference_Data/CRC_Ref/CRC_GSE166555_Expression/CRC_GSE166555_Seurat_SCT_matrix.rds' )
+```
+
+```{r}
+# Find anchors between reference and UMAP data 
+anchors_1 <- FindTransferAnchors(reference = seurat_object, query = UMAP_data_1, dims = 1:10)
+anchors_2 <- FindTransferAnchors(reference = seurat_object, query = UMAP_data_2, dims = 1:10)
+```
+
+```{r}
+predictions.assay_1 <- TransferData(anchorset = anchors_1, refdata = seurat_object$major_lineage, prediction.assay = TRUE,
+                                      weight.reduction = UMAP_data_1[["umap"]], dims = 1:2)
+predictions.assay_2 <- TransferData(anchorset = anchors_2, refdata = seurat_object$major_lineage, prediction.assay = TRUE,
+                                      weight.reduction = UMAP_data_2[["umap"]], dims = 1:2)
+```
+
+```{r}
+# Extract feature data from predictions.assay and transpose it
+feature_data_1 <- t(predictions.assay_1$data)
+
+# Find the column index of the maximum value for each row (cell)
+max_indices_1 <- max.col(feature_data_1, ties.method = "first")
+
+# Get the feature names corresponding to the maximum indices
+max_features_1 <- colnames(feature_data_1)[max_indices_1]
+
+```
+
+```{r}
+# Extract feature data from predictions.assay and transpose it
+feature_data_2<- t(predictions.assay_2$data)
+
+# Find the column index of the maximum value for each row (cell)
+max_indices_2 <- max.col(feature_data_2, ties.method = "first")
+
+# Get the feature names corresponding to the maximum indices
+max_features_2 <- colnames(feature_data_2)[max_indices_2]
+
+```
+
+```{r}
+# Palette de couleurs fixe pour les types cellulaires
+celltype_colors <- c(
+  "Endothelial" = "#FF9A8A",  # Couleur saumon pour Endothelial
+  "Epithelial" = "#D4A017",
+  "Fibroblasts" = "#4DAF4A",
+  "Malignant" = "#00BFC4",
+  "Myofibroblasts" = "#984EA3",
+  "Plasma" = "#FF69B4"
+)
+```
+
+::: panel-tabset 
+## **ColonN_1215002B**
+
+::: panel-tabset
+### Spatial plot
+
+```{r,fig.height=10}
+#Add the max_features as metadata to UMAP_data
+UMAP_data_1 <- AddMetaData(
+  object = UMAP_data_1,
+  metadata = max_features_1,
+  col.name = 'predictions'
+)
+
+final_matrix_1 <- AddMetaData(
+  object = final_matrix_1,
+  metadata = max_features_1,
+  col.name = 'Celltype..major.lineage'
+)
+
+#' Now we get prediction scores for each spot for each class. And we can spatially visualize the different cell classes  
+plot_1 <- Seurat::SpatialPlot(UMAP_data_1, group.by="predictions",label = T,repel=T,pt.size.factor = 2.1) + scale_fill_manual(values = celltype_colors) +
+  scale_color_manual(values = celltype_colors) +  ggtitle("Cell type for ColonN_1215002B")
+#ggplot2::ggsave(filename = "st_ann_Celltype_major_lineage", plot = plot, 
+                #scale = 1, device = "png", path = stRNAseq_07_plots, limitsize = FALSE)
+
+# To visualise each feature it is possible to use SpatialFeaturePlot()
+# features <-  c("Acinar", "B", "CD8Tex", "DC", "Ductal", "Endocrine", "Endothelial", "Fibroblasts", "Malignant",
+#                    "Mono/Macro", "Plasma" , "Stellate")
+# SpatialFeaturePlot(UMAP_data, features= unique(c(UMAP_data$predictions)), ncol = 2, crop = TRUE)
+
+print(plot_1)
+```
+
+### Spatial plot by Features
+
+```{r,fig.height=15}
+SpatialFeaturePlot(final_matrix_1,features=c("CLCA1","SPINK1","ITLN1","TFF3"),pt.size.factor = 2.1,alpha=c(0.1,1))
+```
+
+### Dim plot
+
+```{r}
+DimPlot(UMAP_data_1, group.by = "predictions", label = TRUE) + scale_fill_manual(values=celltype_colors) + scale_color_manual(values=celltype_colors) + ggtitle("Cell type for ColonN_1215002B")
+```
+
+### Barplot
+
+```{r}
+celltype_1 <- as.data.frame(table(final_matrix_1$Celltype..major.lineage))
+colnames(celltype_1) <- c("Celltype","Count")
+ggplot(celltype_1, aes(x = Celltype, y = Count)) +
+  geom_bar(stat = "identity", position = position_dodge(),fill="blue",color="black")  +
+  labs(x = "Celltype Major Lineage", y = "Count") + geom_text(aes(label = Count), vjust = -0.5, position = position_dodge(0.9)) 
+
+```
+```{r}
+#Let's see genes in each spots
+# Extraire les données de comptage et les métadonnées
+counts_data_1 <- as.data.frame(GetAssayData(UMAP_data_1, slot = "counts"))
+metadata_1 <- UMAP_data_1@meta.data
+# Sélectionner les colonnes nécessaires
+metadata_selected_1 <- metadata_1["predictions"] #"seurat_clusters")]
+# Combiner les données de comptage et les métadonnées sélectionnées
+combined_data_1 <- cbind(metadata_selected_1, t(counts_data_1))
+# Afficher les premières lignes du tableau final
+print(head(combined_data_1))
+```
+```{r}
+# Agréger les données par type cellulaire
+aggregated_data_1 <- combined_data_1 %>%
+  group_by(predictions) %>%
+  summarise(across(everything(), sum, na.rm = TRUE))
+
+# Transposer les données pour avoir les gènes en lignes
+aggregated_data_transposed_1 <- aggregated_data_1 %>%
+  pivot_longer(cols = -predictions, names_to = "gene", values_to = "expression")
+
+# Obtenir les gènes les plus exprimés pour chaque type cellulaire
+top_genes_by_celltype_1 <- aggregated_data_transposed_1 %>%
+  group_by(predictions) %>%
+  top_n(10, wt = expression) %>%
+  arrange(predictions, desc(expression))
+
+# Afficher les résultats
+print(top_genes_by_celltype_1)
+```
+
+## **CRC_24676A1**
+
+::: panel-tabset
+### Spatial plot
+
+```{r}
+#Add the max_features as metadata to UMAP_data
+UMAP_data_2 <- AddMetaData(
+  object = UMAP_data_2,
+  metadata = max_features_2,
+  col.name = 'predictions'
+)
+
+final_matrix_2 <- AddMetaData(
+  object = final_matrix_2,
+  metadata = max_features_2,
+  col.name = 'Celltype..major.lineage'
+)
+
+#' Now we get prediction scores for each spot for each class. And we can spatially visualize the different cell classes  
+plot_2 <- Seurat::SpatialPlot(UMAP_data_2, group.by="predictions",label = T,repel=T,pt.size.factor = 2.1)+ scale_fill_manual(values=celltype_colors) + scale_color_manual(values=celltype_colors) + ggtitle("Cell type for CRC_24676A1")
+#ggplot2::ggsave(filename = "st_ann_Celltype_major_lineage", plot = plot, 
+                #scale = 1, device = "png", path = stRNAseq_07_plots, limitsize = FALSE)
+
+# To visualise each feature it is possible to use SpatialFeaturePlot()
+# features <-  c("Acinar", "B", "CD8Tex", "DC", "Ductal", "Endocrine", "Endothelial", "Fibroblasts", "Malignant",
+#                    "Mono/Macro", "Plasma" , "Stellate")
+# SpatialFeaturePlot(UMAP_data, features= unique(c(UMAP_data$predictions)), ncol = 2, crop = TRUE)
+
+print(plot_2)
+```
+
+```{r}
+#Let's see genes in each spots
+# Extraire les données de comptage et les métadonnées
+counts_data_2 <- as.data.frame(GetAssayData(UMAP_data_2, slot = "counts"))
+metadata_2 <- UMAP_data_2@meta.data
+# Sélectionner les colonnes nécessaires
+metadata_selected_2 <- metadata_2["predictions"] #"seurat_clusters")]
+# Combiner les données de comptage et les métadonnées sélectionnées
+combined_data_2 <- cbind(metadata_selected_2, t(counts_data_2))
+# Afficher les premières lignes du tableau final
+print(head(combined_data_2))
+```
+```{r}
+# Agréger les données par type cellulaire
+aggregated_data_2 <- combined_data_2 %>%
+  group_by(predictions) %>%
+  summarise(across(everything(), sum, na.rm = TRUE))
+
+# Transposer les données pour avoir les gènes en lignes
+aggregated_data_transposed_2 <- aggregated_data_2 %>%
+  pivot_longer(cols = -predictions, names_to = "gene", values_to = "expression")
+
+# Obtenir les gènes les plus exprimés pour chaque type cellulaire
+top_genes_by_celltype_2 <- aggregated_data_transposed_2 %>%
+  group_by(predictions) %>%
+  top_n(3, wt = expression) %>%
+  arrange(predictions, desc(expression))
+
+# Afficher les résultats
+print(top_genes_by_celltype_2)
+```
+
+### Spatial plot by Features
+
+```{r,fig.height=15}
+SpatialFeaturePlot(UMAP_data_2,features=c("CLCA1","SPINK1","ITLN1","TFF3"),pt.size.factor = 2.1,alpha=c(0.1,1))
+```
+
+### Dim plot
+
+```{r}
+DimPlot(UMAP_data_2, group.by = "predictions", label = TRUE)+ scale_fill_manual(values=celltype_colors) + scale_color_manual(values=celltype_colors) + ggtitle("Cell type for CRC_24676A1")
+```
+
+### Bar plot
+
+```{r}
+celltype_2 <- as.data.frame(table(final_matrix_2$Celltype..major.lineage))
+colnames(celltype_2) <- c("Celltype","Count")
+ggplot(celltype_2, aes(x = Celltype, y = Count)) +
+  geom_bar(stat = "identity", position = position_dodge(),fill="red",color="black")  + geom_text(aes(label = Count), vjust = -0.5, position = position_dodge(0.9))
+  labs(x = "Celltype Major Lineage", y = "Count")
+```
+:::
+:::
+
+## Visualization
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Préparer les données pour le premier dataset
+data1 <- as.data.frame(table(final_matrix_1$Celltype..major.lineage))
+colnames(data1) <- c("Celltype", "Count")
+data1$Dataset <- prefixes[1]
+
+# Préparer les données pour le second dataset
+data2 <- as.data.frame(table(final_matrix_2$Celltype..major.lineage))
+colnames(data2) <- c("Celltype", "Count")
+data2$Dataset <- prefixes[2]
+
+# Combiner les données en un seul dataframe
+combined_data <- bind_rows(data1, data2)
+
+# S'assurer que tous les Celltypes sont présents dans les deux datasets
+combined_data <- combined_data %>%
+  complete(Celltype, Dataset, fill = list(Count = 0))
+
+# Créer le barplot
+ggplot(combined_data, aes(x = Celltype, y = Count, fill = Dataset)) +
+  geom_bar(stat = "identity", position = position_dodge(), color = "black") +
+  geom_text(aes(label = Count), vjust = -0.3, position = position_dodge(0.9)) +
+  scale_fill_manual(values = c("blue", "red")) +
+  labs(x = "Celltype Major Lineage", y = "Count", fill = "Dataset") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+```{r}
+
+# Calculer les proportions pour le premier dataset
+data1 <- as.data.frame(table(final_matrix_1$Celltype..major.lineage))
+colnames(data1) <- c("Celltype", "Count")
+data1$Dataset <- prefixes[1]
+data1 <- data1 %>%
+  mutate(Proportion = Count / sum(Count))
+
+# Calculer les proportions pour le second dataset
+data2 <- as.data.frame(table(final_matrix_2$Celltype..major.lineage))
+colnames(data2) <- c("Celltype", "Count")
+data2$Dataset <- prefixes[2]
+data2 <- data2 %>%
+  mutate(Proportion = Count / sum(Count))
+
+# Combiner les données en un seul dataframe
+combined_data <- bind_rows(data1, data2)
+
+# S'assurer que tous les Celltypes sont présents dans les deux datasets
+combined_data <- combined_data %>%
+  complete(Celltype, Dataset, fill = list(Count = 0, Proportion = 0))
+
+# Créer le barplot
+ggplot(combined_data, aes(x = Celltype, y = Proportion, fill = Dataset)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") +
+  geom_text(aes(label = scales::percent(Proportion)), vjust = -0.3, position = position_stack(vjust = 0.5)) +
+  scale_fill_manual(values = c("blue", "red")) +
+  labs(x = "Celltype Major Lineage", y = "Proportion", fill = "Dataset") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+
+# Calculer les proportions pour le premier dataset
+data1 <- as.data.frame(table(final_matrix_1$Celltype..major.lineage))
+colnames(data1) <- c("Celltype", "Count")
+data1$Dataset <- prefixes[1]
+data1 <- data1 %>%
+  mutate(Proportion = Count / sum(Count))
+
+# Calculer les proportions pour le second dataset
+data2 <- as.data.frame(table(final_matrix_2$Celltype..major.lineage))
+colnames(data2) <- c("Celltype", "Count")
+data2$Dataset <- prefixes[2]
+data2 <- data2 %>%
+  mutate(Proportion = Count / sum(Count))
+
+# Combiner les données en un seul dataframe
+combined_data <- bind_rows(data1, data2)
+
+# Créer le barplot
+ggplot(combined_data, aes(x = Dataset, y = Proportion, fill = Celltype)) +
+  geom_bar(stat = "identity", position = "fill", color = "black") +
+  geom_text(aes(label = ifelse(Proportion > 0, 
+                               ifelse(Proportion < 0.01, scales::percent(Proportion, accuracy = 0.1), 
+                                      scales::percent(Proportion, accuracy = 0.1)), 
+                               "")), 
+            position = position_stack(vjust = 0.5), 
+            size = ifelse(combined_data$Proportion < 0.01,4 , 3), 
+            check_overlap = TRUE) +
+  scale_fill_manual(values = celltype_colors) +
+  labs(x = "Dataset", y = "Proportion", fill = "Celltype") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+data_dirs <- sapply(prefixes,function(x) paste0(directory,'plots/04_CL/', x,"/Markers"))
+
+top_10_markers_1 <- read.csv(paste0(data_dirs[1],"/top10_markers.txt"),sep=" ")
+top_10_markers_2 <- read.csv(paste0(data_dirs[2],"/top10_markers.txt"),sep=" ")
+
+all_markers_1 <-read.csv(paste0(data_dirs[1],"/all_markers.txt"),sep=" ")
+all_markers_2 <- read.csv(paste0(data_dirs[2],"/all_markers.txt"),sep=" ")
+
+top_specific_markers_1 <- all_markers_1 %>% group_by(cluster) %>% top_n(n = 3, wt = avg_log2FC)
+top_specific_markers_2 <- all_markers_2 %>% group_by(cluster) %>% top_n(n = 3, wt = avg_log2FC)
+
+
+```
+
+```{r}
+# Obtenir les types cellulaires prédits
+predicted_celltypes_1 <- UMAP_data_1@meta.data$predictions
+
+all_markers_1 <- all_markers_1 %>%
+  mutate(Celltype = predicted_celltypes_1[match(cluster, rownames(UMAP_data_1@meta.data))])
+
+
+# Fonction pour obtenir les top 3 gènes par type cellulaire prédit
+get_top_markers_by_prediction <- function(marker_data) {
+  top_markers <- marker_data %>%
+    group_by(Celltype) %>%
+    top_n(3, wt = avg_log2FC)
+  return(top_markers)
+}
+
+# Appliquer la fonction aux données de marqueurs
+top_specific_markers_1 <- get_top_markers_by_prediction(all_markers_1)
+
+```
+
